@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Lane Racer</title>
+  <meta name="description" content="Lane Racer 2.0 – endloses 3D-Rennen durch fünf Welten. Weiche dem Verkehr aus, sammle Münzen, zünde Nitro und fahr mit Freunden um die Wette.">
+  <meta name="theme-color" content="#0E1117">
+  <meta name="color-scheme" content="dark">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230E1117'/%3E%3Cpath d='M7 25 13 7h5.4l-6 18z' fill='%23FF5A1F'/%3E%3Cpath d='M17.6 25 23.6 7H28l-6 18z' fill='%23FFC93C'/%3E%3C/svg%3E">
+
+  <!-- Schriften: Russo One (Display), Saira + Saira Condensed (UI/HUD) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Russo+One&amp;family=Saira:wght@400..800&amp;family=Saira+Condensed:wght@600;700;800&amp;display=swap">
+
+  <link rel="stylesheet" href="style.css">
+
+  <!-- Module ohne Build-Schritt: three.js, Addons und Supabase direkt vom CDN -->
+  <script type="importmap">
+  { "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/",
+      "@supabase/supabase-js": "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.116.0/+esm"
+  } }
+  </script>
+
+  <link rel="modulepreload" href="js/main.js">
+  <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+</head>
+<body>
+  <!-- main.js hängt hier den WebGL-Canvas ein -->
+  <div id="scene"></div>
+
+  <!-- ui.js baut die komplette Oberfläche in diesen Container -->
+  <div id="ui">
+    <div class="boot" role="status">
+      <p class="boot__logo" aria-hidden="true"><span>Lane</span><b>Racer</b></p>
+      <p class="boot__text">Lane Racer wird geladen …</p>
+      <span class="boot__bar" aria-hidden="true"><i></i></span>
+    </div>
+  </div>
+
+  <noscript>
+    <div class="noscript">
+      <h1>JavaScript wird benötigt</h1>
+      <p>Lane Racer läuft direkt im Browser und braucht dafür JavaScript sowie WebGL.
+         Bitte aktiviere JavaScript und lade die Seite neu.</p>
+    </div>
+  </noscript>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
