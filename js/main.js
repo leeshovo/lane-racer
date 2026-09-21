@@ -7,11 +7,11 @@
 import * as THREE from 'three';
 import {
   CONFIG, SUPABASE, CARS, PERKS, WORLDS, POWERUPS, SPECIAL_COLORS, carById, VERSION, DEFAULT_SETTINGS, sanitizeSettings,
-  WORLD_TIMES, TIME_LABELS, WORLD_HILL_COLOR,
+  WORLD_TIMES, TIME_LABELS, WORLD_HILL_COLOR, TUNING,
 } from './config.js';
 import {
   loadProfile, saveProfile, buyCar, selectCar, setCarColor, colorOf, applyRun, selectedCarOf,
-  checkAchievements, achievementViews, unlockedColors, streakView, applyWeeklyRewards,
+  checkAchievements, achievementViews, unlockedColors, streakView, applyWeeklyRewards, buyTuning, tuningOf,
 } from './storage.js';
 import { World } from './world.js';
 import { Effects } from './effects.js';
@@ -22,6 +22,7 @@ import {
   dailyKey, dailyRaceId,
 } from './online.js';
 import { updateBend, setBendEnabled } from './bend.js';
+import { rankedWorld, rankedRaceId } from './ranked.js';
 import { Structures } from './structures.js';
 import { Tutorial } from './tutorial.js';
 import { createFriends } from './friends.js';
@@ -66,6 +67,7 @@ const app = {
   tutorial: null,       // Tipps der ersten Runde (null = keine)
   activeMap: null,      // Kampagnenkarte der laufenden Runde
   week: null,           // { endsAt, offset } der laufenden Wochenwertung (Serverzeit)
+  ranked: null,         // { slot, endsAt, offset } der aktuellen Ranked-Karte (Serverzeit)
   invited: false,       // Dieser Besuch kam über einen Einladungslink (neuer Spieler)
   resumeAt: 0,          // Zeitpunkt (ms), an dem es nach der Pause weitergeht (0 = kein Rückwärtszählen läuft)
   resumeShown: 0,       // zuletzt angezeigte Zahl des Rückwärtszählens
@@ -126,6 +128,8 @@ const ui = new UI({
   callbacks: {
     onPlay: () => playPressed(),
     onOpenDaily: () => startDaily(),
+    onOpenRanked: () => startRanked(),
+    onBuyTuning: (carId, trackId) => purchaseTuning(carId, trackId),
     onChallenge: () => shareChallenge(),
     onCopyRecovery: () => cloud.copyRecovery(),
     onRestoreCode: (code) => cloud.restoreFromCode(code),
@@ -195,7 +199,7 @@ function boot() {
   ui.setLoading('Motor wird vorgeglüht …');
 
   try {
-    renderer = new THREE.WebGLRenderer({ antialias: quality !== 'low', powerPreference: 'high-performance' });
+    renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
   } catch (err) {
     ui.showFatal('WebGL nicht verfügbar', 'Dein Browser oder Gerät unterstützt kein WebGL. Probier einen aktuellen Chrome, Edge, Firefox oder Safari.');
     return;
@@ -243,6 +247,7 @@ function boot() {
       await ensureRegistered();
       await cloud.pull();
       if (profile.online) online.joinWeek(profile.online);
+      refreshRanked();
       claimWeeklyRewards({ force: true });
       if (app.pendingFriend) friends.acceptLink();
       if (app.pendingParty) joinParty(app.pendingParty);
@@ -507,6 +512,7 @@ function renderMenu() {
     rejoin: !app.party && profile.lastParty ? profile.lastParty.code : '',
     campaign: { level: levelInfo(profile.campaign.xp).level, stars: totalStars(profile.campaign), maxStars: CAMPAIGN_MAPS.length * 3 },
     daily: dailyMenuText(),
+    ranked: rankedMenuText(),
   });
 }
 
@@ -550,6 +556,7 @@ function renderGarage() {
     colors: profile.colors,
     coins: profile.coins,
     extraColors: unlockedColors(profile).map((c) => c.color),
+    tuning: profile.owned.map((id) => [id, tuningOf(profile, id)]),
   });
 }
 
@@ -557,6 +564,24 @@ function previewCar(carId) {
   app.previewCar = carId;
   game.setPlayerCar(carId, colorOf(profile, carId));
   renderGarage();
+}
+
+function purchaseTuning(carId, trackId) {
+  const result = buyTuning(profile, carId, trackId);
+  if (!result.ok) {
+    audio.play('error');
+    ui.toast('Tuning nicht möglich', result.error, 'error');
+    return;
+  }
+  const achieved = checkAchievements(profile);
+  saveProfile(profile);
+  audio.play('buy');
+  const track = TUNING.find((t) => t.id === trackId);
+  ui.toast(`${track.name} Stufe ${result.level}`, `${carById(carId).name}: ${track.text.replace(' je Stufe', '')} insgesamt ${Math.round(result.level * track.per * 100)} %`, 'info');
+  announceAchievements(achieved.unlocked);
+  cloud.scheduleSave();
+  renderGarage();
+  renderTopBar();
 }
 
 function purchaseCar(carId) {
@@ -784,6 +809,22 @@ async function loadLeaderboard(kind, { silent = false } = {}) {
     await friends.load(base);
     return;
   }
+  if (kind === 'ranked') {
+    const r = await refreshRanked();
+    if (!r) {
+      ui.renderLeaderboard({ ...base, rows: [], loading: false, error: 'Die aktuelle Ranked-Karte konnte nicht geladen werden.' });
+      return;
+    }
+    const res = await online.leaderboard('ranked', r.slot);
+    if (app.leaderboardKind !== kind || app.screen !== 'leaderboard') return;
+    ui.renderLeaderboard({ ...base, rows: res.rows || [], loading: false, error: res.error || null });
+    if (!res.error) {
+      const rows = res.rows || [];
+      const mine = base.meId ? rows.find((row) => row.id === base.meId) : null;
+      ui.renderRanked({ endsAt: r.endsAt, offset: r.offset, world: WORLDS[rankedWorld(r.slot)].name, rank: mine ? mine.rank : 0, best: mine ? mine.best : 0, players: rows.length });
+    }
+    return;
+  }
   if (kind === 'weekly') {
     if (profile.online) online.joinWeek(profile.online); // wer die Wertung ansieht, ist dabei (idempotent)
     const [res, info] = await Promise.all([online.leaderboard(kind), online.weekInfo()]);
@@ -812,8 +853,8 @@ async function loadLeaderboard(kind, { silent = false } = {}) {
 // Live: Solange die Wochenwertung offen ist, wird sie alle paar Sekunden neu geladen
 const LIVE_BOARD_MS = 6000;
 setInterval(() => {
-  if (document.hidden || app.screen !== 'leaderboard' || app.leaderboardKind !== 'weekly' || online.status !== 'online') return;
-  loadLeaderboard('weekly', { silent: true });
+  if (document.hidden || app.screen !== 'leaderboard' || (app.leaderboardKind !== 'weekly' && app.leaderboardKind !== 'ranked') || online.status !== 'online') return;
+  loadLeaderboard(app.leaderboardKind, { silent: true });
 }, LIVE_BOARD_MS);
 
 /** Einladungslink kopieren (oder teilen): Wer ihn öffnet, meldet sich mit Namen an und ist sofort in der Wochenwertung. */
@@ -1195,9 +1236,62 @@ function playPressed() {
 
 /** "Nochmal": Tagesrennen und Herausforderungen wiederholen dieselbe Strecke, alles andere startet neu. */
 function restartRun() {
-  if (app.lastStart) startRun({ ...app.lastStart, remember: true });
+  if (app.lastStart && String(app.lastStart.raceId || '').startsWith('ranked-')) startRanked();
+  else if (app.lastStart) startRun({ ...app.lastStart, remember: true });
   else startRun({});
 }
+
+// ---------------------------------------------------------------------------
+// Ranked-Karten: alle 12 Stunden eine neue Strecke in einer festen Welt (Zählung: Wochenwertung)
+// ---------------------------------------------------------------------------
+/** Holt die aktuelle Karte vom Server (nur wenn die bekannte abgelaufen ist oder force gesetzt ist). */
+async function refreshRanked(force = false) {
+  if (!force && app.ranked && Date.now() + app.ranked.offset < app.ranked.endsAt) return app.ranked;
+  if (online.status === 'offline') return app.ranked;
+  const info = await online.rankedInfo();
+  if (info.error) return app.ranked;
+  app.ranked = { slot: info.slot, endsAt: info.endsAt, offset: info.offset };
+  if (app.screen === 'menu') renderMenu();
+  return app.ranked;
+}
+
+function rankedMenuText() {
+  const r = app.ranked;
+  if (!r) return 'Neue Karte alle 12 Stunden';
+  const left = Math.max(0, r.endsAt - (Date.now() + r.offset));
+  const h = Math.floor(left / 3600000);
+  const m = Math.floor((left % 3600000) / 60000);
+  return `${WORLDS[rankedWorld(r.slot)].name} · noch ${h > 0 ? `${h} h ${m} min` : `${m} min`}`;
+}
+
+async function startRanked() {
+  const r = await refreshRanked();
+  if (!r || online.status === 'offline') {
+    ui.toast('Ranked', 'Für Ranked-Karten brauchst du eine Verbindung – so zählt jede Fahrt fair für alle.', 'error');
+    return;
+  }
+  if (Date.now() + r.offset >= r.endsAt) {
+    const fresh = await refreshRanked(true);
+    if (!fresh) return;
+  }
+  const slot = app.ranked.slot;
+  startRun({ seed: `ranked-${slot}`, raceId: rankedRaceId(slot), remember: true, world: rankedWorld(slot) });
+  ui.toast(WORLDS[rankedWorld(slot)].name, 'Ranked-Karte: für alle dieselbe Strecke – dein bester Lauf zählt für die Wochenwertung.', 'party');
+}
+
+/** Platz auf der Ranked-Karte einblenden. */
+async function announceRankedPlace(slot) {
+  const res = await online.leaderboard('ranked', slot);
+  if (!res.rows || app.screen !== 'gameover') return;
+  const id = profile.online?.id;
+  const index = res.rows.findIndex((r) => r.id === id || r.player_id === id);
+  if (index >= 0) ui.toast(`Ranked: Platz ${index + 1}`, `Von ${res.rows.length} ${res.rows.length === 1 ? 'Fahrer' : 'Fahrern'} auf dieser Karte`, index === 0 ? 'mission' : 'info');
+}
+
+setInterval(() => {
+  if (document.hidden || online.status !== 'online') return;
+  if (app.screen === 'menu') { refreshRanked(); renderMenu(); }
+}, 30000);
 
 /** Tagesrennen: heute für alle Spieler weltweit derselbe Seed, also dieselbe Strecke. */
 function startDaily() {
@@ -1300,28 +1394,29 @@ function registerServiceWorker() {
 // ===========================================================================
 // Runde starten / beenden
 // ===========================================================================
-function startRun({ seed, raceId = null, countdown, challenge = null, remember = false, map = null }) {
+function startRun({ seed, raceId = null, countdown, challenge = null, remember = false, map = null, world: lockWorld = null }) {
   unlockAudio();
   cancelResume();
   app.settingsFromPause = false;
   app.paused = false;
   ui.showPause(false);
   audio.setPaused(false);
-  if (!raceId || String(raceId).startsWith('daily-')) app.race = null;
+  if (!raceId || String(raceId).startsWith('daily-') || String(raceId).startsWith('ranked-')) app.race = null;
 
   if (game.carId !== profile.selectedCar || game.carColor !== colorOf(profile, profile.selectedCar)) {
     game.setPlayerCar(profile.selectedCar, colorOf(profile, profile.selectedCar));
   }
+  game.setTuning(tuningOf(profile, profile.selectedCar));
   const runSeed = seed ?? `${Date.now()}-${Math.random()}`;
-  const startWorld = map ? map.world : 0;
-  const firstTime = map ? map.time : timeFor(runSeed, 0);
+  const startWorld = map ? map.world : lockWorld ?? 0;
+  const firstTime = map ? map.time : timeFor(runSeed, startWorld);
   world.setWorld(startWorld, false, firstTime);
   structures.reset(runSeed);
   audio.setMusic(WORLDS[startWorld].id);
   audio.setMusicIntensity(0.5);
   app.runSeed = runSeed;
   app.activeChallenge = challenge;
-  app.lastStart = remember ? { seed: runSeed, raceId, challenge, map } : null;
+  app.lastStart = remember ? { seed: runSeed, raceId, challenge, map, world: lockWorld } : null;
   app.activeMap = map;
   liveCache = null;
   if (!map) registerRunOnServer(); // Kampagnenrunden zählen nicht für die Rangliste
@@ -1332,6 +1427,7 @@ function startRun({ seed, raceId = null, countdown, challenge = null, remember =
     countdown: countdown ?? CONFIG.countdownSolo,
     mode: map ? 'campaign' : profile.settings.difficulty,
     map,
+    world: lockWorld,
   });
 
   // Tipps nur in der ersten normalen Runde – nicht in Party, Tagesrennen oder Herausforderung
@@ -1526,12 +1622,14 @@ async function finishRun(result) {
     car: result.car,
     party: app.partyCode,
     raceId: result.raceId,
+    trace: result.trace,
   });
   if (app.screen !== 'gameover') return;
   if (res && !res.error) {
     ui.updateGameOver({ rank: res.rank, online: 'submitted' });
     if (app.partyCode) refreshPartyBoard();
     if (result.isDaily) announceDailyPlace();
+    if (result.isRanked) announceRankedPlace(String(result.raceId).slice(7));
   } else {
     ui.updateGameOver({ online: 'error' });
   }

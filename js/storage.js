@@ -9,7 +9,7 @@
 import { sanitizeCampaign, defaultCampaign, totalStars, levelInfo, CAMPAIGN_MAPS } from './campaign.js';
 import {
   CARS, MISSION_POOL, CONFIG, DIFFICULTY_MODES, ACHIEVEMENTS, SPECIAL_COLORS, carById, DEFAULT_SETTINGS, sanitizeSettings, streakBonus,
-  WEEKLY_ITEMS, RESET_EPOCH,
+  WEEKLY_ITEMS, RESET_EPOCH, TUNING, TUNING_MAX, tuningCost,
 } from './config.js';
 
 const KEY = 'laneRacer2.profile';
@@ -22,11 +22,12 @@ export function defaultProfile() {
     name: '',
     coins: 0,
     owned: ['blitz'],
+    tuning: {},                     // { autoId: { nitro, handling, coins } } – gekaufte Tuning-Stufen
     selectedCar: 'blitz',
     colors: Object.fromEntries(CARS.map((c) => [c.id, c.colors[0]])),
     best: 0,
     stats: {
-      runs: 0, totalDistance: 0, totalCoins: 0, nearMisses: 0, smashed: 0, overtakes: 0, partyRaces: 0, dailyRuns: 0,
+      runs: 0, totalDistance: 0, totalCoins: 0, nearMisses: 0, smashed: 0, overtakes: 0, partyRaces: 0, dailyRuns: 0, rankedRuns: 0,
       bestLevel: 0, bestHard: 0, bestStreak: 0, // Höchstwerte (für Erfolge)
     },
     streak: { last: '', count: 0 }, // letzter Fahrtag (YYYYMMDD, UTC) und Tage in Folge
@@ -80,6 +81,7 @@ function normalize(stored) {
   // Nur erlaubte Lackfarben übernehmen: die des Autos oder freigeschaltete Sonderlacke
   for (const car of CARS) if (!car.colors.includes(p.colors[car.id]) && !isColorUnlocked(p, p.colors[car.id])) p.colors[car.id] = car.colors[0];
   p.missionTier = { ...(stored.missionTier || {}) };
+  p.tuning = sanitizeTuning(stored.tuning);
   p.owned = Array.isArray(stored.owned) ? stored.owned.filter((id) => CARS.some((c) => c.id === id)) : ['blitz'];
   if (!p.owned.includes('blitz')) p.owned.unshift('blitz');
   if (!p.owned.includes(p.selectedCar)) p.selectedCar = 'blitz';
@@ -125,6 +127,7 @@ export function snapshotOf(profile) {
     epoch: RESET_EPOCH,
     coins: profile.coins,
     owned: [...profile.owned],
+    tuning: sanitizeTuning(profile.tuning),
     selectedCar: profile.selectedCar,
     colors: { ...profile.colors },
     best: profile.best,
@@ -199,6 +202,9 @@ export function metricValue(profile, metric) {
     case 'bestLevel': return s.bestLevel;
     case 'bestStreak': return s.bestStreak;
     case 'dailyRuns': return s.dailyRuns;
+    case 'rankedRuns': return s.rankedRuns;
+    case 'tuningTotal': return Object.values(profile.tuning || {}).reduce((n, t) => n + TUNING.reduce((m, tr) => m + (t[tr.id] || 0), 0), 0);
+    case 'tuningMaxCar': return Math.max(0, ...Object.values(profile.tuning || {}).map((t) => (TUNING.every((tr) => (t[tr.id] || 0) >= TUNING_MAX) ? TUNING.length * TUNING_MAX : 0)));
     case 'partyRaces': return s.partyRaces;
     case 'bestHard': return s.bestHard;
     case 'campaignStars': return totalStars(profile.campaign);
@@ -345,6 +351,38 @@ export function buyCar(profile, carId) {
   return { ok: true };
 }
 
+/** Gekaufte Tuning-Stufen eines Autos: { nitro, handling, coins } (je 0–5). */
+export function tuningOf(profile, carId) {
+  const t = (profile.tuning && profile.tuning[carId]) || {};
+  return Object.fromEntries(TUNING.map((tr) => [tr.id, Math.min(TUNING_MAX, Math.max(0, Math.floor(Number(t[tr.id]) || 0)))]));
+}
+
+/** Nächste Tuning-Stufe eines Werts kaufen (das Auto muss in der Garage stehen). */
+export function buyTuning(profile, carId, trackId) {
+  const track = TUNING.find((t) => t.id === trackId);
+  if (!track || !profile.owned.includes(carId)) return { ok: false, error: 'Dieses Auto gehört dir noch nicht.' };
+  const level = tuningOf(profile, carId)[trackId];
+  const cost = tuningCost(level);
+  if (cost === null) return { ok: false, error: 'Schon voll ausgebaut.' };
+  if (profile.coins < cost) return { ok: false, error: `Dir fehlen noch ${(cost - profile.coins).toLocaleString('de-DE')} Münzen.` };
+  profile.coins -= cost;
+  profile.tuning = { ...(profile.tuning || {}), [carId]: { ...tuningOf(profile, carId), [trackId]: level + 1 } };
+  return { ok: true, level: level + 1, cost };
+}
+
+/** Wandelt beliebige gespeicherte Tuning-Daten in { autoId: { nitro, handling, coins } } um (nur bekannte Autos, Stufen 0–5). */
+export function sanitizeTuning(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const car of CARS) {
+    const t = raw[car.id];
+    if (!t || typeof t !== 'object') continue;
+    const levels = Object.fromEntries(TUNING.map((tr) => [tr.id, Math.min(TUNING_MAX, Math.max(0, Math.floor(Number(t[tr.id]) || 0)))]));
+    if (Object.values(levels).some((v) => v > 0)) out[car.id] = levels;
+  }
+  return out;
+}
+
 export function selectCar(profile, carId) {
   if (!profile.owned.includes(carId)) return false;
   profile.selectedCar = carId;
@@ -423,7 +461,8 @@ export function applyRun(profile, run) {
     for (const key of ['collected', 'nearMiss', 'smash', 'distance']) breakdown[key] = Math.round(breakdown[key] * modeDef.coins);
   }
   const subtotal = breakdown.collected + breakdown.nearMiss + breakdown.smash + breakdown.distance;
-  if (car.perk === 'coinBonus') breakdown.perk = Math.round(subtotal * 0.2);
+  const tuned = tuningOf(profile, car.id);
+  breakdown.perk = Math.round(subtotal * ((car.perk === 'coinBonus' ? 0.2 : 0) + tuned.coins * TUNING.find((t) => t.id === 'coins').per));
 
   // Statistiken
   const s = profile.stats;
@@ -434,6 +473,7 @@ export function applyRun(profile, run) {
   s.overtakes += run.overtakes || 0;
   if (run.isPartyRace) s.partyRaces += 1;
   if (run.isDaily) s.dailyRuns += 1;
+  if (run.isRanked) s.rankedRuns += 1;
 
   // Missionen
   const runValues = {

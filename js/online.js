@@ -19,6 +19,7 @@
  *    damit das Spiel auch ohne Internet bzw. ohne CDN startet.
  */
 import { CARS, EMOTES, QUICK_CHAT } from './config.js';
+import { isRankedSlot } from './ranked.js';
 
 // ---------------------------------------------------------------------------
 // Konstanten
@@ -129,6 +130,18 @@ const codePointLength = (s) => Array.from(s).length;
 const failure = (code, message = MSG[code] || MSG.unexpected) => ({ error: message, code });
 
 /** Zahl aus Datenbank-Zeilen (dort kommen Zahlen evtl. auch als String) → Ganzzahl im Bereich. */
+/** Fahrtverlauf (alle 1,5 s die gefahrene Strecke) für die Serverprüfung; alles Ungültige wird verworfen. */
+export function cleanTrace(trace) {
+  if (!Array.isArray(trace) || !trace.length) return null;
+  const out = [];
+  for (const v of trace.slice(0, 400)) {
+    const n = Math.round(Number(v));
+    if (!Number.isFinite(n) || n < 0 || n > MAX_DISTANCE) return null;
+    out.push(n);
+  }
+  return out;
+}
+
 function toInt(v, min, max, fallback) {
   const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
   return Number.isFinite(n) ? clamp(Math.round(n), min, max) : fallback;
@@ -562,6 +575,7 @@ export class Online {
         p_car: cleanCar(run.car),
         p_party: normalizePartyCode(run.party),
         p_race: raceId,
+        p_trace: cleanTrace(run.trace),
       });
       if (res.error) return res;
       const row = firstRow(res.data);
@@ -589,6 +603,7 @@ export class Online {
       let res;
       if (kind === 'global') res = await this._rpc('leaderboard_global', { p_limit: pLimit });
       else if (kind === 'weekly') res = await this._rpc('leaderboard_week', { p_limit: pLimit });
+      else if (kind === 'ranked') res = await this._rpc('leaderboard_ranked', { p_slot: typeof partyCode === 'string' && isRankedSlot(partyCode) ? partyCode : '', p_limit: pLimit });
       else if (kind === 'daily') {
         const day = typeof partyCode === 'string' && RE_DAY.test(partyCode) ? partyCode : dailyKey();
         res = await this._rpc('leaderboard_daily', { p_day: day, p_limit: pLimit });
@@ -620,6 +635,26 @@ export class Online {
       const serverNow = row ? Date.parse(row.server_now) : NaN;
       if (![startsAt, endsAt, serverNow].every(Number.isFinite)) return failure('server', MSG.badResponse);
       return { startsAt, endsAt, offset: serverNow - Date.now() };
+    } catch (err) {
+      return unexpected(err);
+    }
+  }
+
+  /**
+   * Aktuelle Ranked-Karte (wechselt alle 12 Stunden): Kennung und Ende nach Server-Uhr.
+   * @returns {Promise<{ slot: string, startsAt: number, endsAt: number, offset: number } | { error, code }>}
+   */
+  async rankedInfo() {
+    try {
+      const res = await this._rpc('ranked_info', {});
+      if (res.error) return res;
+      const row = firstRow(res.data);
+      const slot = row && typeof row.slot === 'string' ? row.slot : '';
+      const startsAt = row ? Date.parse(row.starts_at) : NaN;
+      const endsAt = row ? Date.parse(row.ends_at) : NaN;
+      const serverNow = row ? Date.parse(row.server_now) : NaN;
+      if (!isRankedSlot(slot) || ![startsAt, endsAt, serverNow].every(Number.isFinite)) return failure('server', MSG.badResponse);
+      return { slot, startsAt, endsAt, offset: serverNow - Date.now() };
     } catch (err) {
       return unexpected(err);
     }

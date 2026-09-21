@@ -64,8 +64,14 @@ Rammen, Nitro, Überholen) bringen Stern 2 und 3. Ziel und Aufgaben stehen währ
 - **Ereignisse:** *Goldrausch* (lange Münzlinien), *Stoßverkehr* (dichter Verkehr, dafür doppelte Beinahe-Münzen)
   und der *Schwerlast-Konvoi* (zwei Lkw, 15 m lang, mit Bonus fürs Überholen oder Rammen).
 - **Power-ups:** Nitro-Kanister, Schutzschild, Münzmagnet, doppelte Münzen.
-- **8 Autos** mit eigenen Werten, einem passiven Bonus und einer **aktiven Fähigkeit**:
-  Blitzstart, Münzsog, Rammbock, Reparatur, Sirene, Phasensprung, Overdrive und Schwebesprung.
+- **14 Autos** (13 kaufbar, dazu der Wochenpreis) mit eigenen Werten, einem passiven Bonus und einer **aktiven Fähigkeit**.
+  Die Preise reichen von 900 bis 45.000 Münzen – wer alle will, muss grinden.
+- **Tuning:** Jedes Auto in der Garage lässt sich in drei Werten je 5 Stufen ausbauen (Nitro-Tank +8 % Nitro-Dauer,
+  Fahrwerk +4 % Handling, Münzsammler +5 % Münzen je Stufe; 500 bis 5.200 Münzen pro Stufe). Das Tempo lässt sich
+  bewusst nicht tunen, damit die Grenzen der Serverprüfung gültig bleiben. Dazu vier neue Erfolge.
+- **Ranked-Karten:** Alle 12 Stunden (Berlin 00:00 und 12:00) gibt es eine neue Strecke in einer festen Welt – für alle
+  dieselbe. Es zählt der beste Lauf pro Karte; die Wochenwertung ist die **Summe deiner besten Läufe je Karte**
+  (bis zu 14 Karten pro Woche). Jede Karte hat eine eigene Live-Rangliste.
 - **Missionen:** drei laufende Aufgaben, danach kommt jeweils eine schwerere Stufe.
 - **Fair by design:** In jeder Gegner-Reihe bleibt mindestens eine Spur frei, und von jeder freien Spur
   reicht ein Spurwechsel für die nächste Reihe. Um den Konvoi herum gibt es extra Platz.
@@ -97,7 +103,7 @@ Einstellungen gehören zum Gerät und werden nicht mit der Cloud synchronisiert.
 ## Wochenwertung mit Preisen
 
 Die **Rangliste „Diese Woche“** ist live (aktualisiert sich alle paar Sekunden) und **startet jeden Mittwoch um 12:00 Uhr
-(deutsche Zeit) neu**, damit nicht immer dieselben oben stehen. Gewertet wird der beste Score der Woche.
+(deutsche Zeit) neu**, damit nicht immer dieselben oben stehen. Gewertet wird die Summe der besten Läufe je Ranked-Karte.
 
 | Platz | Preis |
 |---|---|
@@ -112,6 +118,10 @@ Die Lacke gelten für alle Autos. Gewinnt man nochmal, gibt es beim Auto-Sieg 1.
 
 - **Einladungslink:** In der Wochen-Rangliste auf „Freunde einladen“ drücken und den Link schicken. Wer ihn öffnet, gibt
   nur seinen Namen ein und ist **sofort in der Wertung** (mit 0 m) und mit dir befreundet.
+- **Server:** Das Spiel selbst liegt statisch auf GitHub Pages (immer erreichbar). Die Datenbank läuft bei Supabase; damit der
+  kostenlose Plan sie nicht wegen Inaktivität pausiert, ruft `.github/workflows/keepalive.yml` alle 8 Stunden die Datenbank an, und ein
+  `pg_cron`-Job schließt stündlich beendete Wochen ab. (GitHub schaltet geplante Workflows ab, wenn das Repository 60 Tage lang
+  ruhig ist – dann einmal im Actions-Tab wieder aktivieren.)
 - **Belohnungen:** Nach dem Wochenende holt das Spiel sie beim nächsten Start automatisch ab und zeigt sie in einem Fenster.
   Sie bleiben in der Datenbank gespeichert, bis sie abgeholt sind – auch wenn du gerade offline warst. Doppelte
   Auszahlung ist ausgeschlossen (Bestätigung erst nach dem Speichern, Woche wird lokal vermerkt).
@@ -222,6 +232,7 @@ js/
   effects.js    Bloom, Partikel, Schockwellen, Schild, Tempo-Striche
   audio.js      Motor, Soundeffekte und Musik – komplett im Browser erzeugt
   online.js     Supabase: Ranglisten, Party, Live-Positionen, Cloud-Spielstand
+  ranked.js     Ranked-Karten: Fenster-Kennung, Welt je Karte
   ui.js         Menüs, Garage, HUD, Party-Lobby, Game-Over, Einstellungen
   storage.js    Spielstand im Browser, Snapshot für die Cloud
   rng.js        Zufallsgenerator mit Seed (für identische Rennen)
@@ -245,6 +256,12 @@ Supabase-Projekt `lane-racer` (Region Frankfurt, kostenloser Plan):
   gefahrenen Strecke passen (mindestens eins pro 90 m) und das Level zur Fahrzeit (alle 12 s eins, höchstens 15).
 - Der Schlüssel in `js/config.js` ist der öffentliche „Publishable Key“. Er darf im Browser stehen, der
   Schutz kommt aus Row Level Security und den Funktionen.
+
+- **Fahrtverlauf (Anti-Cheat):** Das Spiel misst alle 1,5 s Spielzeit die gefahrene Strecke und schickt den Verlauf mit.
+  `submit_score` prüft ihn gegen die Physik: nie schneller als das Grundtempo × 2,9, nie rückwärts, nicht dauerhaft langsamer
+  als 60 % des Grundtempos, die Anzahl der Messpunkte passt zur Fahrzeit und der Endstand zum letzten Punkt. Ein erfundener Score
+  braucht damit einen stimmigen Verlauf statt nur einer plausiblen Endzahl. Ranked-Karten werden nur in ihrem 12-Stunden-Fenster angenommen.
+  Tests: `tests/game.test.mjs` (ehrliche Fahrten mit allen 14 Autos bestehen die Prüfung) und `tests/ranked.test.mjs`.
 
 **Grenzen des Cheat-Schutzes:** (Auch die neuen Prüfungen schützen nur vor plumpen Fälschungen.) Wer wirklich Zeit im Spiel verbringt, kann den Client manipulieren und einen
 Score knapp unter der physikalischen Grenze einreichen. Für einen Freundeskreis reicht das, für eine große

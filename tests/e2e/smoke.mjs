@@ -162,6 +162,8 @@ try {
     if (name === 'missions') check(await page.evaluate(() => document.querySelectorAll('.ach').length >= 15), 'Erfolgsliste gefüllt');
     if (name === 'garage') check(await page.evaluate(async () => { const cfg = await import('/js/config.js'); const cars = await import('/js/cars.js'); return cfg.CARS.every((c) => { const v = cars.createPlayerCar(c.id, c.colors[0]); return v && v.object && v.object.children.length > 0; }); }), 'jedes Auto lässt sich bauen');
     if (name === 'garage') check(await page.evaluate(() => document.querySelectorAll('.car').length === 14), '14 Autos in der Garage (13 kaufbar + Wochenpreis)');
+    if (name === 'garage') check(await page.evaluate(() => document.querySelectorAll('.car .tune__row').length === 14 * 3), 'Tuning-Zeilen in jeder Garagenkarte');
+    if (name === 'leaderboard') check(await page.evaluate(() => [...document.querySelectorAll('.tab')].map((t) => t.textContent.trim()).includes('Ranked')), 'Tab "Ranked" vorhanden');
     if (name === 'leaderboard') check(await page.evaluate(() => [...document.querySelectorAll('.tab')].map((t) => t.textContent.trim()).includes('Freunde')), 'Tab "Freunde" vorhanden');
   }
 

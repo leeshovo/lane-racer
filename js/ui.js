@@ -19,6 +19,7 @@
 import {
   CARS, PERKS, EMOTES, WORLDS, CONFIG, MISSION_POOL, LEVELS_PER_WORLD, VERSION, DEFAULT_SETTINGS, SETTINGS_GROUPS,
   SPECIAL_COLORS, STREAK, streakBonus, QUICK_CHAT, WEEKLY_ITEMS, WEEKLY_RESET, weeklyPrizeCoins,
+  TUNING, TUNING_MAX, tuningCost,
 } from './config.js';
 import {
   TEAL, MUTED, NF, NF1, num, clamp01, fmtInt, fmtDist, fmtLongDist, fmtTime, fmtCountdown, statFrac, changed, easeOut, isDigit, COLOR_RE, safeColor, UNSAFE_CHARS, cleanName, cleanText, nameError, carName, missionMode, mq, h, appendAll, animate, coinIcon, checker, chevrons, srOnly, ICONS, iconCache, icon, Digits, byDistanceDesc, FRAMES,
@@ -43,6 +44,7 @@ const STAT_DEFS = [['speed', 'Tempo'], ['handling', 'Handling'], ['nitro', 'Nitr
 const NET_LABEL = { online: 'Online', connecting: 'Verbinde …', offline: 'Offline' };
 const LB_TABS = [
   { kind: 'weekly', label: 'Diese Woche' },
+  { kind: 'ranked', label: 'Ranked' },
   { kind: 'global', label: 'Allzeit' },
   { kind: 'daily', label: 'Heute' },
   { kind: 'friends', label: 'Freunde' },
@@ -239,7 +241,7 @@ export class UI {
   }
 
   /** Hauptmenü: Rekord, gewähltes Auto, 3 Missionen, Party-Hinweis. */
-  renderMenu({ best = 0, car = null, missions = [], party = null, daily = null, rejoin = '', campaign = null } = {}) {
+  renderMenu({ best = 0, car = null, missions = [], party = null, daily = null, rejoin = '', campaign = null, ranked = null } = {}) {
     const m = this.mn;
     if (campaign && m.campaignSub) m.campaignSub.textContent = `Stufe ${campaign.level} · ${campaign.stars}/${campaign.maxStars} ★`;
     m.best.set(best);
@@ -263,11 +265,12 @@ export class UI {
     }
     m.partySub.textContent = code ? `Party ${code}` : (rejoin ? `Zurück zu ${rejoin}` : 'mit Freunden');
     if (typeof daily === 'string') m.dailySub.textContent = cleanText(daily, 40);
+    if (typeof ranked === 'string') m.rankedSub.textContent = cleanText(ranked, 40);
     m.bestTicker.textContent = best > 0 ? `Dein Rekord: ${fmtDist(best)} – schaffst du mehr?` : 'Noch kein Rekord – zeig, was du kannst';
   }
 
   /** Garage: Karten aller Autos (einmal gebaut, danach nur aktualisiert). */
-  renderGarage({ cars = CARS, perks = PERKS, owned = [], selectedCar = null, previewCar = null, colors = {}, coins = 0, extraColors = [] } = {}) {
+  renderGarage({ cars = CARS, perks = PERKS, owned = [], selectedCar = null, previewCar = null, colors = {}, coins = 0, extraColors = [], tuning = [] } = {}) {
     const g = this.gg;
     const list = Array.isArray(cars) && cars.length ? cars : CARS;
     const key = list.map((c) => c.id).join('|');
@@ -281,6 +284,7 @@ export class UI {
         g.list.append(card.li);
       });
     }
+    const tuningMap = new Map(Array.isArray(tuning) ? tuning : []);
     const ownedSet = new Set(Array.isArray(owned) ? owned : []);
     const activeCar = list.find((c) => c.id === selectedCar) || null;
     const coinCount = Math.floor(num(coins));
@@ -296,6 +300,7 @@ export class UI {
         coins: coinCount,
         activeCar,
         extraColors: Array.isArray(extraColors) ? extraColors : [],
+        tuning: tuningMap.get(car.id) || null,
       });
     }
     g.count.textContent = `${ownedCount}/${list.length}`;
@@ -312,7 +317,9 @@ export class UI {
     lb.friends.hidden = kind !== 'friends';
     lb.removable = kind === 'friends';
     lb.week.hidden = kind !== 'weekly';
+    lb.ranked.hidden = kind !== 'ranked';
     if (kind !== 'weekly') this._stopWeekTimer();
+    if (kind !== 'ranked') this._stopRankedTimer();
     const k = LB_TABS.some((t) => t.kind === kind) ? kind : 'global';
     for (const tab of lb.tabs) {
       const isParty = tab.kind === 'party';
@@ -342,7 +349,7 @@ export class UI {
       lb.state.append(h('div', { class: 'empty' },
         icon('flag', 'empty__icon'),
         h('p', { class: 'empty__title' }, 'Noch keine Einträge – fahr los!'),
-        h('p', { class: 'empty__text' }, k === 'weekly' ? 'Die Wochenwertung startet jeden Montag neu.' : k === 'daily' ? 'Heute ist noch niemand das Tagesrennen gefahren – sei der Erste!' : 'Der erste Platz ist noch frei.')));
+        h('p', { class: 'empty__text' }, k === 'weekly' ? 'Die Wochenwertung startet jeden Mittwoch um 12:00 Uhr neu. Sie zählt deine besten Ranked-Fahrten.' : k === 'ranked' ? 'Auf dieser Karte ist noch niemand gefahren – sei der Erste!' : k === 'daily' ? 'Heute ist noch niemand das Tagesrennen gefahren – sei der Erste!' : 'Der erste Platz ist noch frei.')));
     } else {
       lb.state.hidden = true;
       lb.list.hidden = false;
@@ -370,8 +377,33 @@ export class UI {
       const item = rank <= 3 ? Object.values(WEEKLY_ITEMS).find((i) => i.rank === rank) : null;
       lb.weekMe.textContent = `Du bist Platz ${rank} von ${players} (${fmtInt(best)} m) – wenn die Woche jetzt endet, bekommst du ${fmtInt(coins)} Münzen${item ? ` und ${item.name}` : ''}.`;
     } else {
-      lb.weekMe.textContent = 'Fahr eine Runde, um dich zu platzieren – ab dem ersten Punkt bekommst du zum Wochenende mindestens 25 Münzen.';
+      lb.weekMe.textContent = 'Fahr eine Ranked-Karte, um dich zu platzieren – ab dem ersten Punkt bekommst du zum Wochenende mindestens 25 Münzen.';
     }
+  }
+
+  /**
+   * Ranked-Karte: Welt, Restzeit (läuft weiter) und eigener Platz.
+   * @param {{ endsAt: number, offset: number, world: string, rank: number, best: number, players: number }} info
+   */
+  renderRanked({ endsAt = 0, offset = 0, world = '', rank = 0, best = 0, players = 0 } = {}) {
+    const lb = this.lb;
+    lb.rankedEndsAt = num(endsAt);
+    lb.rankedOffset = num(offset);
+    lb.rankedWorld.textContent = cleanText(world, 40);
+    const tick = () => {
+      lb.rankedCount.textContent = lb.rankedEndsAt ? fmtCountdown(lb.rankedEndsAt - (Date.now() + lb.rankedOffset)) : '…';
+    };
+    tick();
+    this._stopRankedTimer();
+    this._rankedTimer = setInterval(tick, 15000);
+    lb.rankedMe.textContent = rank > 0 && best > 0
+      ? `Du bist auf dieser Karte Platz ${rank} von ${players} (${fmtInt(best)} m). Dein bester Lauf pro Karte zählt für die Wochenwertung.`
+      : 'Fahr diese Karte, um dich zu platzieren. Dein bester Lauf pro Karte zählt für die Wochenwertung.';
+  }
+
+  _stopRankedTimer() {
+    clearInterval(this._rankedTimer);
+    this._rankedTimer = 0;
   }
 
   _stopWeekTimer() {
@@ -1520,11 +1552,13 @@ export class UI {
     m.campaignSub = campaign.subEl;
     const daily = navBtn('flag', 'Tagesrennen', 'Neue Strecke jeden Tag', 'onOpenDaily', 'navbtn--daily');
     m.dailySub = daily.subEl;
+    const ranked = navBtn('bolt', 'Ranked', 'Neue Karte alle 12 Stunden', 'onOpenRanked', 'navbtn--ranked');
+    m.rankedSub = ranked.subEl;
     const missions = navBtn('target', 'Missionen', 'Münzen verdienen', 'onOpenMissions');
     const settings = navBtn('sliders', 'Einstellungen', 'Sound & Grafik', 'onOpenSettings');
     m.partySub = party.subEl;
     const nav = h('nav', { class: 'menu__nav', 'aria-label': 'Hauptmenü' },
-      campaign.btn, daily.btn, party.btn, friends.btn, garage.btn, board.btn, missions.btn, settings.btn);
+      campaign.btn, ranked.btn, daily.btn, party.btn, friends.btn, garage.btn, board.btn, missions.btn, settings.btn);
 
     m.partyCode = h('strong', { class: 'party-badge__code' });
     m.partyCount = h('span', { class: 'party-badge__count' });
@@ -1732,6 +1766,24 @@ export class UI {
       h('div', { class: 'swatches', role: 'group', 'aria-label': `Lackierung für ${car.name}` },
         swatches.map((s) => s.btn), specials.map((s) => s.btn)));
 
+    // Tuning: drei Werte je 5 Stufen (nur für Autos in der Garage)
+    const tuneRows = TUNING.map((tr) => {
+      const pips = Array.from({ length: TUNING_MAX }, () => h('i', { class: 'pip' }));
+      const cost = h('span', { class: 'tune__cost' });
+      const btn = h('button', {
+        type: 'button', class: 'btn btn--gold btn--sm tune__btn', 'data-sfx': 'none',
+        onClick: () => this._call('onBuyTuning', id, tr.id),
+      }, cost);
+      const li = h('li', { class: 'tune__row' },
+        h('span', { class: 'tune__name' }, h('strong', null, tr.name), h('span', null, tr.text)),
+        h('span', { class: 'tune__pips', 'aria-hidden': 'true' }, pips),
+        btn);
+      return { id: tr.id, name: tr.name, pips, cost, btn, li };
+    });
+    const tuneEl = h('div', { class: 'car__tune', hidden: true },
+      h('span', { class: 'car__colors-label' }, 'Tuning'),
+      h('ul', { class: 'tune' }, tuneRows.map((r) => r.li)));
+
     const buy = h('button', {
       type: 'button', class: 'btn btn--gold btn--sm car__buy', 'data-sfx': 'none',
       'aria-label': `${car.name} kaufen für ${fmtInt(car.price)} Münzen`,
@@ -1752,22 +1804,23 @@ export class UI {
         abilityEl,
         h('p', { class: 'car__desc' }, cleanText(car.description, 200)),
         colorsEl,
+        tuneEl,
         h('div', { class: 'car__actions' }, buy, select, activeTag),
         hint));
     // Klick irgendwo auf die Karte (nicht auf einen Button) → Vorschau
     li.addEventListener('click', (e) => {
       if (!e.target.closest('button')) this._call('onPreviewCar', id);
     });
-    return { car, li, head, statusText, statusCoin, stats, swatches, specials, colorsEl, buy, select, activeTag, hint, key: '' };
+    return { car, li, head, statusText, statusCoin, stats, swatches, specials, colorsEl, tuneEl, tuneRows, buy, select, activeTag, hint, key: '' };
   }
 
-  _updateCarCard(card, { owned, selected, preview, color, coins, activeCar, extraColors = [] }) {
+  _updateCarCard(card, { owned, selected, preview, color, coins, activeCar, extraColors = [], tuning = null }) {
     if (!card) return;
     const car = card.car;
     const price = Math.floor(num(car.price));
     const exclusive = Boolean(car.exclusive);
     const locked = !owned && (exclusive || coins < price);
-    const key = `${owned}|${selected}|${preview}|${color}|${locked}|${activeCar ? activeCar.id : ''}|${locked ? coins : ''}|${extraColors.join(',')}`;
+    const key = `${owned}|${selected}|${preview}|${color}|${locked}|${activeCar ? activeCar.id : ''}|${locked ? coins : ''}|${extraColors.join(',')}|${tuning ? TUNING.map((t) => tuning[t.id]).join('.') : ''}|${owned ? coins : ''}`;
     if (key === card.key) return;
     card.key = key;
 
@@ -1792,6 +1845,21 @@ export class UI {
       s.btn.title = open ? s.name : `${s.name} – wird durch einen Erfolg oder Wochenpreis freigeschaltet`;
     }
 
+    card.tuneEl.hidden = !owned;
+    if (owned) {
+      for (const r of card.tuneRows) {
+        const level = Math.min(TUNING_MAX, Math.max(0, Math.floor(num(tuning && tuning[r.id]))));
+        const price = tuningCost(level);
+        r.pips.forEach((p, i) => p.classList.toggle('is-on', i < level));
+        r.btn.hidden = false;
+        r.btn.disabled = price === null;
+        r.btn.classList.toggle('is-locked', price !== null && coins < price);
+        r.cost.textContent = '';
+        if (price === null) r.cost.append('Max');
+        else r.cost.append(coinIcon(), fmtInt(price));
+        r.btn.setAttribute('aria-label', price === null ? `${r.name} voll ausgebaut` : `${r.name} auf Stufe ${level + 1} verbessern für ${fmtInt(price)} Münzen`);
+      }
+    }
     card.buy.hidden = owned || exclusive;
     card.buy.classList.toggle('is-locked', locked);
     card.select.hidden = !owned || selected;
@@ -1922,7 +1990,18 @@ export class UI {
       h('p', { class: 'week__more' }, 'Platz 4: 500 · 5: 400 · 6: 320 · 7: 260 · 8: 210 · 9: 170 · 10: 140 · 11–15: 100 · 16–25: 70 · 26–50: 40 · danach 25 Münzen für jeden mit Punkten.'),
       lb.weekMe,
       h('div', { class: 'week__invite' }, lb.weekInvite, lb.weekShare));
-    lb.panel = h('div', { class: 'sheet__body lb', id: 'lr-lb-panel', role: 'tabpanel' }, lb.week, lb.friends, lb.state, lb.list);
+    // Ranked-Karte: Welt, Restzeit, eigener Platz, Start
+    lb.rankedCount = h('strong', { class: 'week__count' }, '…');
+    lb.rankedWorld = h('span', { class: 'week__reset' });
+    lb.rankedMe = h('p', { class: 'week__me' });
+    lb.rankedPlay = h('button', { type: 'button', class: 'btn btn--primary btn--sm', onClick: () => this._call('onOpenRanked') },
+      icon('play'), h('span', { class: 'btn__label' }, 'Diese Karte fahren'));
+    lb.ranked = h('section', { class: 'week', hidden: true, 'aria-label': 'Ranked-Karte' },
+      h('div', { class: 'week__head' }, h('span', { class: 'week__label' }, 'Neue Karte in'), lb.rankedCount, lb.rankedWorld,
+        h('span', { class: 'week__live' }, h('i', null), 'Live')),
+      lb.rankedMe,
+      h('div', { class: 'week__invite' }, lb.rankedPlay));
+    lb.panel = h('div', { class: 'sheet__body lb', id: 'lr-lb-panel', role: 'tabpanel' }, lb.week, lb.ranked, lb.friends, lb.state, lb.list);
     this._sheet('leaderboard', { kicker: 'Bestenliste', title: 'Rangliste', cls: 'sheet--board' }, tablist, lb.panel);
     this.lb = lb;
   }

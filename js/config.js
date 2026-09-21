@@ -7,9 +7,9 @@
  * Spielstand-Generation. Wird sie geändert, verwirft jedes Gerät beim nächsten Besuch seinen lokalen Spielstand
  * (Einstellungen bleiben) und fragt den Namen neu ab. Zusammen mit dem Leeren der Datenbank ein kompletter Neustart.
  */
-export const RESET_EPOCH = '2026-09-21-b';
+export const RESET_EPOCH = '2026-09-22-final';
 
-export const VERSION = '2.6.0';
+export const VERSION = '2.7.0';
 
 // Öffentliche Supabase-Zugangsdaten (Publishable Key darf im Browser stehen –
 // geschützt wird über Row Level Security und geprüfte Server-Funktionen).
@@ -425,8 +425,25 @@ export const ACHIEVEMENTS = [
   { id: 'camp_stars_15', name: 'Sternesammler', text: 'Sammle 15 Sterne in der Kampagne',         metric: 'campaignStars', target: 15,   reward: 200 },
   { id: 'camp_stars_40', name: 'Sternenhimmel', text: 'Sammle 40 Sterne in der Kampagne',         metric: 'campaignStars', target: 40,   reward: 500 },
   { id: 'camp_lvl_10', name: 'Routinier',       text: 'Erreiche Fahrerstufe 10',                  metric: 'campaignLevel', target: 10,   reward: 300 },
+  { id: 'ranked_1',   name: 'Ranked-Debüt',    text: 'Fahre eine Ranked-Karte',                    metric: 'rankedRuns',   target: 1,     reward: 60 },
+  { id: 'ranked_20',  name: 'Ranked-Profi',    text: 'Fahre 20 Ranked-Karten',                     metric: 'rankedRuns',   target: 20,    reward: 400 },
+  { id: 'tune_5',     name: 'Schrauber',       text: 'Kaufe 5 Tuning-Stufen',                      metric: 'tuningTotal',  target: 5,     reward: 150 },
+  { id: 'tune_max',   name: 'Vollgetunt',      text: 'Tune ein Auto auf allen Werten voll aus',    metric: 'tuningMaxCar', target: 15,    reward: 1000 },
   { id: 'hard_2k',    name: 'Nervenstark',     text: 'Fahre 2.000 m im Hardcore-Modus',            metric: 'bestHard',     target: 2000,  reward: 200 },
 ];
+
+// ---------------------------------------------------------------------------
+// Tuning: Jedes Auto lässt sich in drei Werten je 5 Stufen verbessern (Münzen-Senke zum Sammeln).
+// Nichts davon erhöht das Tempo – die Grenzen der Serverprüfung bleiben also gültig.
+// ---------------------------------------------------------------------------
+export const TUNING_MAX = 5;
+export const TUNING_COSTS = [500, 1000, 1900, 3200, 5200]; // Preis der nächsten Stufe (0→1, 1→2, …)
+export const TUNING = [
+  { id: 'nitro',    name: 'Nitro-Tank',   text: '+8 % Nitro-Dauer je Stufe',  per: 0.08 },
+  { id: 'handling', name: 'Fahrwerk',     text: '+4 % Handling je Stufe',     per: 0.04 },
+  { id: 'coins',    name: 'Münzsammler',  text: '+5 % Münzen je Stufe',       per: 0.05 },
+];
+export const tuningCost = (level) => (level >= 0 && level < TUNING_MAX ? TUNING_COSTS[level] : null);
 
 // Sonderlacke: gelten für alle Autos, sobald der Erfolg geschafft ist, der sie freischaltet.
 export const SPECIAL_COLORS = {

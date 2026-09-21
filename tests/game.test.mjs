@@ -386,3 +386,53 @@ describe('Serverprüfung: ehrliche Runden bleiben plausibel', () => {
     }
   });
 });
+
+// Fahrtverlauf (Cheat-Schutz): dieselben Regeln wie _trace_ok in der Datenbank – auch mit Vollgas, Nitro und Fähigkeiten
+const baseSpeed = (t) => 25 + (47 * Math.min(Math.max(t, 0), 180)) / 180;
+function traceOk(trace, score, dur) {
+  const n = trace.length;
+  if (score < 400 && n === 0) return 'ok';
+  if (n === 0 || n > 400) return 'leer';
+  if (Math.abs(n - Math.floor(dur / 1.5)) > 2) return `Länge ${n} statt ${Math.floor(dur / 1.5)}`;
+  for (let i = 0; i < n; i++) {
+    const prev = i ? trace[i - 1] : 0;
+    const ord = i + 1;
+    const d = trace[i] - prev;
+    if (d < 0) return `rückwärts bei ${ord}`;
+    if (d > 1.5 * (baseSpeed(ord * 1.5) * 2.9 * 1.03) + 3) return `zu schnell bei ${ord}: ${d}`;
+    if (ord > 4 && d < 1.5 * baseSpeed((ord - 1) * 1.5) * 0.6) return `zu langsam bei ${ord}: ${d}`;
+  }
+  if (trace[n - 1] > score + 5) return 'Trace über Score';
+  if (score - trace[n - 1] > 1.6 * (baseSpeed(dur) * 2.9 * 1.03) + 10) return 'Score weit über Trace';
+  return 'ok';
+}
+
+describe('Serverprüfung: Fahrtverlauf', () => {
+  for (const car of CARS.map((c) => c.id)) {
+    it(`ehrliche Fahrt mit ${car} besteht die Verlaufsprüfung (Vollgas, Nitro, Fähigkeit)`, () => {
+      let result = null;
+      const game = makeGame({ onOver: (r) => { result = r; } }, car);
+      game.start({ seed: `trace-${car}`, countdown: 0.01 });
+      run(game, 70, () => {
+        bot(game);
+        if (!game.player.brake) game.setGas(true);
+        game.useAbility();
+        if (game.nitro > 0.9) game.triggerNitro();
+      });
+      const r = result || { distance: game.distance, duration: game.elapsed, trace: game.trace };
+      assert.equal(traceOk(r.trace, Math.floor(r.distance), r.duration), 'ok', `${car}: ${r.trace.length} Punkte, ${r.duration.toFixed(1)} s`);
+    });
+  }
+
+  it('der Verlauf ist ein Messpunkt alle 1,5 s und wird zurückgesetzt', () => {
+    let result = null;
+    const game = makeGame({ onOver: (r) => { result = r; } });
+    game.start({ seed: 'trace-len', countdown: 0.01 });
+    run(game, 30, () => bot(game));
+    const first = game.trace.length;
+    assert.ok(first >= 5 && first === Math.floor(game.elapsed / 1.5), `${first} Punkte nach ${game.elapsed.toFixed(1)} s`);
+    game.start({ seed: 'trace-len-2', countdown: 0.01 });
+    assert.equal(game.trace.length, 0);
+    assert.ok(result === null || Array.isArray(result.trace));
+  });
+});

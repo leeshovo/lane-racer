@@ -12,7 +12,7 @@
 import * as THREE from 'three';
 import {
   CONFIG, LANE_X, LANE_COUNT, PLAYER_SIZE, TRAFFIC, TRAFFIC_COLORS, POWERUPS, POWERUP_COLORBLIND, DIFFICULTY_MODES,
-  WORLDS, worldIndexForLevel, carById,
+  WORLDS, worldIndexForLevel, carById, TUNING,
 } from './config.js';
 import { createRng } from './rng.js';
 import { createPlayerCar, createTrafficVehicle, createGhostCar, createNameTag } from './cars.js';
@@ -38,6 +38,8 @@ const POWERUP_WEIGHTS = [
   { type: 'double', weight: 20 },
 ];
 const MAX_COINS = 120;
+const TUNE = Object.fromEntries(TUNING.map((t) => [t.id, t.per]));
+const TRACE_STEP = 1.5; // Sekunden zwischen zwei Messpunkten des Fahrtverlaufs (der Server erwartet genau diesen Takt)
 const GRAVITY = 32;
 
 // Wiederverwendete Objekte (keine Allokationen pro Frame)
@@ -100,6 +102,7 @@ export class Game {
     this.carId = 'blitz';
     this.carColor = '#ff5a1f';
     this.car = carById(this.carId);
+    this.tuning = { nitro: 0, handling: 0, coins: 0 }; // gekaufte Tuning-Stufen des Autos (siehe storage.tuningOf)
     this.vehicle = null;
     this.player = {
       lane: MIDDLE_LANE, x: LANE_X[MIDDLE_LANE], vx: 0, speed: 0,
@@ -121,6 +124,11 @@ export class Game {
   // =========================================================================
   // Öffentliche Steuerung
   // =========================================================================
+
+  /** Tuning-Stufen des gefahrenen Autos ({ nitro, handling }, je 0–5). Tempo bleibt unverändert. */
+  setTuning(t) {
+    this.tuning = { nitro: Math.min(5, Math.max(0, Math.floor(Number(t && t.nitro) || 0))), handling: Math.min(5, Math.max(0, Math.floor(Number(t && t.handling) || 0))), coins: 0 };
+  }
 
   /** Tauscht das Spielerauto (Garage, Farbwahl). */
   setPlayerCar(carId, color) {
@@ -162,11 +170,14 @@ export class Game {
    * @param {object} opts { seed, raceId, party, countdown (s), mode ('easy'|'normal'|'hard'|'campaign'), map }
    *   map (Kampagne): { id, world, d0, d1, goal } – feste Welt, Schwierigkeit von d0 bis d1 über die Strecke, Ziel nach goal m
    */
-  start({ seed = `${Date.now()}-${Math.random()}`, raceId = null, party = null, countdown = CONFIG.countdownSolo, mode = 'normal', map = null } = {}) {
+  start({ seed = `${Date.now()}-${Math.random()}`, raceId = null, party = null, countdown = CONFIG.countdownSolo, mode = 'normal', map = null, world = null } = {}) {
     this.#clearRun();
     this.#resetRun();
     this.map = map && !raceId ? { id: map.id, world: map.world, d0: map.d0, d1: map.d1, goal: map.goal } : null;
     if (this.map) this.worldIndex = this.map.world;
+    // Ranked-Karte: feste Welt, die ganze Runde lang
+    this.lockedWorld = Number.isInteger(world) && world >= 0 && world < WORLDS.length && !this.map ? world : null;
+    if (this.lockedWorld !== null) this.worldIndex = this.lockedWorld;
     // Gemeinsame Strecken (Party, Tagesrennen) sind immer "normal", damit alle denselben Verkehr sehen
     this.mode = raceId ? 'normal' : (mode in DIFFICULTY_MODES ? mode : 'normal');
     this.modeDef = DIFFICULTY_MODES[this.mode];
@@ -395,7 +406,7 @@ export class Game {
       : Math.min(CONFIG.maxLevel, 1 + Math.floor(this.elapsed / CONFIG.levelTime));
     if (level > this.level) {
       this.level = level;
-      const worldIndex = this.map ? this.map.world : worldIndexForLevel(level);
+      const worldIndex = this.map ? this.map.world : this.lockedWorld !== null ? this.lockedWorld : worldIndexForLevel(level);
       if (worldIndex !== this.worldIndex) {
         this.worldIndex = worldIndex;
         this.events.onWorld?.(worldIndex);
@@ -413,6 +424,8 @@ export class Game {
     // 4) Strecke
     const dz = this.player.speed * dt;
     this.distance += dz;
+    // Fahrtverlauf für den Server: alle 1,5 s Spielzeit die bisher gefahrene Strecke
+    while (this.elapsed >= (this.trace.length + 1) * TRACE_STEP && this.trace.length < 400) this.trace.push(Math.round(this.distance));
 
     // 5) Verkehr: neue Reihe exakt im Sollabstand
     if (this.lastRowZ - CONFIG.spawnZ >= this.nextRowSpacing) {
@@ -516,7 +529,7 @@ export class Game {
   /** Kritisch gedämpfte Feder für den Spurwechsel (wie Version 1). */
   #updateSteering(dt) {
     const p = this.player;
-    const k = CONFIG.steerStiffness * this.car.stats.handling;
+    const k = CONFIG.steerStiffness * this.car.stats.handling * (1 + this.tuning.handling * TUNE.handling);
     const targetX = LANE_X[p.lane];
     const accel = k * k * (targetX - p.x) - 2 * k * p.vx;
     p.vx += accel * dt;
@@ -536,7 +549,7 @@ export class Game {
   #updateTimers(dt) {
     // Nitro
     if (this.nitroActive) {
-      this.nitro -= dt / (CONFIG.nitroDuration * this.car.stats.nitro);
+      this.nitro -= dt / (CONFIG.nitroDuration * this.car.stats.nitro * (1 + this.tuning.nitro * TUNE.nitro));
       if (this.nitro <= 0) {
         this.nitro = 0;
         this.nitroActive = false;
@@ -1087,6 +1100,8 @@ export class Game {
     this.party = null;
     this.distance = 0;
     this.elapsed = 0;
+    this.trace = [];
+    this.lockedWorld = null;
     this.difficulty = 0;
     this.baseSpeed = CONFIG.startSpeed;
     this.level = 1;
@@ -1172,8 +1187,10 @@ export class Game {
       nitroUses: this.nitroUses,
       raceId: this.raceId,
       party: this.party,
-      isPartyRace: Boolean(this.raceId) && !String(this.raceId).startsWith('daily-'),
+      isPartyRace: Boolean(this.raceId) && !String(this.raceId).startsWith('daily-') && !String(this.raceId).startsWith('ranked-'),
       isDaily: Boolean(this.raceId) && String(this.raceId).startsWith('daily-'),
+      isRanked: Boolean(this.raceId) && String(this.raceId).startsWith('ranked-'),
+      trace: this.trace.slice(),
       seed: this.seed,
       car: this.carId,
       mode: this.mode,

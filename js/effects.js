@@ -94,7 +94,18 @@ export class Effects {
   // =========================================================================
   #createComposer() {
     const size = this.renderer.getSize(new THREE.Vector2());
-    this.composer = new EffectComposer(this.renderer);
+    // Mit Nachbearbeitung gilt das Kantenglätten des Canvas nicht mehr – deshalb bekommt das Zielbild selbst MSAA
+    // (Hoch: 4×, Mittel: 2×). Geht das nicht, läuft es wie bisher ohne.
+    const samples = this.quality === 'high' ? 4 : this.quality === 'medium' ? 2 : 0;
+    let target;
+    if (samples && this.renderer.capabilities.isWebGL2) {
+      try {
+        target = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples });
+      } catch (err) {
+        target = undefined;
+      }
+    }
+    this.composer = new EffectComposer(this.renderer, target);
     this.renderPass = new RenderPass(this.scene, this.camera);
     this.composer.addPass(this.renderPass);
 

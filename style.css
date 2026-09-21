@@ -4186,3 +4186,18 @@ button.cmap:hover { border-color: var(--signal); box-shadow: 0 6px 22px rgba(255
 .wr__text strong { color: var(--text); font-size: 1rem; }
 .wr__prize { color: var(--gold); font-weight: 700; }
 .wr__total { margin: 0 0 12px; color: var(--gold); font-weight: 800; }
+
+/* Tuning in der Garage */
+.car__tune { margin: 10px 0; }
+.tune { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; }
+.tune__row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; background: rgba(243, 245, 249, 0.04); }
+.tune__name { display: flex; flex-direction: column; min-width: 0; font-size: 0.78rem; }
+.tune__name strong { font-family: var(--font-cond); letter-spacing: 0.06em; text-transform: uppercase; }
+.tune__name span { color: var(--muted); }
+.tune__pips { display: inline-flex; gap: 3px; }
+.tune__pips .pip { width: 9px; height: 14px; border-radius: 2px; background: rgba(243, 245, 249, 0.14); }
+.tune__pips .pip.is-on { background: var(--gold); box-shadow: 0 0 6px rgba(255, 201, 60, 0.6); }
+.tune__btn { min-width: 84px; justify-content: center; }
+.tune__cost { display: inline-flex; align-items: center; gap: 4px; }
+.navbtn--ranked .navbtn__icon { color: #ff5a1f; background: rgba(255, 90, 31, 0.13); }
+.navbtn--ranked .navbtn__sub { color: #ff8a5c; }
