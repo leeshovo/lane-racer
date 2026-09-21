@@ -55,6 +55,11 @@ const W_Z_BACK = 22;
 const W_Z_FRONT = -86;
 const W_Z_SPAN = W_Z_BACK - W_Z_FRONT;
 
+// So nah darf Deko höchstens an die Fahrbahn (Straße 14,4 m breit → Innenkante mindestens hier)
+const ROAD_CLEAR = 9.6;
+// Diese Bauwerke stehen absichtlich quer über der Straße (Torbogen, Schilderbrücke)
+const ACROSS_ROAD = new Set(['canyon:arch', 'neon:gantry', 'neon:gantrySign']);
+
 const QUALITY_PRESETS = {
   // Schatten: nur Fahrzeuge werfen welche (Deko-Pools würden jede Instanz erneut zeichnen). Die Karte deckt nur
   // 44 × 68 m rund ums Auto ab – 1024 px reichen dafür scharf genug.
@@ -1775,6 +1780,15 @@ export class World {
     const sx = Array.isArray(s) ? s[0] : s;
     const sy = Array.isArray(s) ? s[1] : s;
     const sz = Array.isArray(s) ? s[2] : s;
+    if (x !== 0 && !ACROSS_ROAD.has(key)) {
+      // Tatsächliche Größe aus der Geometrie: halbe Ausdehnung (gedreht, daher der Umkreis) mal Skalierung
+      const geo = slot.pool.mesh.geometry;
+      if (!geo.boundingBox) geo.computeBoundingBox();
+      const bb = geo.boundingBox;
+      const radius = Math.hypot(Math.max(Math.abs(bb.min.x), Math.abs(bb.max.x)) * sx, Math.max(Math.abs(bb.min.z), Math.abs(bb.max.z)) * sz);
+      const limit = ROAD_CLEAR + radius;
+      if (Math.abs(x) < limit) x = Math.sign(x) * limit;
+    }
     this._e.set(rx, ry, 0);
     this._q.setFromEuler(this._e);
     this._v.set(x, y, z);
@@ -1808,6 +1822,15 @@ export class World {
     return side * rand(min, max);
   }
 
+  /**
+   * Wie _sideX, aber für breite Objekte: Der Mittelpunkt liegt so weit draußen, dass die Innenkante des Objekts
+   * (Mitte − half) nie näher als ROAD_CLEAR an der Fahrbahn ist. Verhindert Häuser, Lava und Eis auf der Straße.
+   */
+  _sideXClear(min, max, half) {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    return side * Math.max(rand(min, max), ROAD_CLEAR + half);
+  }
+
   get _generators() {
     if (!this.__gens) {
       this.__gens = {
@@ -1826,14 +1849,15 @@ export class World {
     const trees = Math.round(6 * den);
     for (let i = 0; i < trees; i++) {
       const s = rand(0.75, 1.45);
-      this._place(seg, 'meadow:tree', this._sideX(10, 58), zr(), {
+      this._place(seg, 'meadow:tree', this._sideXClear(10, 58, 1.7 * s), zr(), {
         ry: rand(0, 6.28), s: [s, s * rand(0.9, 1.3), s],
         color: new THREE.Color().setHSL(rand(0.22, 0.32), rand(0.35, 0.6), rand(0.4, 0.58)).getHex(),
       });
     }
     const bushes = Math.round(5 * den);
     for (let i = 0; i < bushes; i++) {
-      this._place(seg, 'meadow:bush', this._sideX(9.2, 40), zr(), { ry: rand(0, 6.28), s: rand(0.7, 1.5) });
+      const bs = rand(0.7, 1.5);
+      this._place(seg, 'meadow:bush', this._sideXClear(9.2, 40, 1.1 * bs), zr(), { ry: rand(0, 6.28), s: bs });
     }
     const hills = Math.round(2 * den);
     for (let i = 0; i < hills; i++) {
@@ -1857,7 +1881,7 @@ export class World {
     const pillars = Math.round(3.4 * den);
     for (let i = 0; i < pillars; i++) {
       const s = rand(0.7, 1.7);
-      this._place(seg, 'canyon:pillar', this._sideX(12, 70), zr(), {
+      this._place(seg, 'canyon:pillar', this._sideXClear(12, 70, 2.4 * s), zr(), {
         ry: rand(0, 6.28), s: [s, s * rand(0.7, 1.9), s],
         color: new THREE.Color().setHSL(rand(0.04, 0.08), rand(0.4, 0.62), rand(0.36, 0.52)).getHex(),
       });
@@ -1870,12 +1894,14 @@ export class World {
     }
     const cacti = Math.round(3.2 * den);
     for (let i = 0; i < cacti; i++) {
-      this._place(seg, 'canyon:cactus', this._sideX(9.3, 46), zr(), { ry: rand(0, 6.28), s: rand(0.7, 1.5) });
+      const cs = rand(0.7, 1.5);
+      this._place(seg, 'canyon:cactus', this._sideXClear(9.3, 46, 1 * cs), zr(), { ry: rand(0, 6.28), s: cs });
     }
     const rocks = Math.round(3.6 * den);
     for (let i = 0; i < rocks; i++) {
-      this._place(seg, 'canyon:boulder', this._sideX(9.2, 60), zr(), {
-        y: rand(-0.4, 0), ry: rand(0, 6.28), s: rand(0.5, 2.2),
+      const rs = rand(0.5, 2.2);
+      this._place(seg, 'canyon:boulder', this._sideXClear(9.2, 60, 1.5 * rs), zr(), {
+        y: rand(-0.4, 0), ry: rand(0, 6.28), s: rs,
       });
     }
     if (chance(0.1 * den)) this._place(seg, 'canyon:arch', 0, zr(), { s: rand(0.95, 1.15) });
@@ -1886,23 +1912,25 @@ export class World {
     const towers = Math.round(5.4 * den);
     for (let i = 0; i < towers; i++) {
       const w = rand(7, 17), d = rand(7, 16), h = rand(14, 58);
-      const x = this._sideX(12, 80);
+      const ry = rand(-0.35, 0.35);
+      const x = this._sideXClear(12, 80, (w * Math.abs(Math.cos(ry)) + d * Math.abs(Math.sin(ry))) / 2);
       this._place(seg, 'neon:building', x, zr(), {
-        ry: rand(-0.35, 0.35), s: [w, h, d],
+        ry, s: [w, h, d],
         color: new THREE.Color().setHSL(rand(0.58, 0.75), rand(0.15, 0.4), rand(0.16, 0.3)).getHex(),
       });
     }
     const blocks = Math.round(3.2 * den);
     for (let i = 0; i < blocks; i++) {
-      this._place(seg, 'neon:block', this._sideX(9.4, 34), zr(), {
-        ry: rand(-0.3, 0.3), s: [rand(4, 11), rand(2.5, 7), rand(4, 10)],
+      const bw = rand(4, 11), bd = rand(4, 10), bry = rand(-0.3, 0.3);
+      this._place(seg, 'neon:block', this._sideXClear(9.4, 34, (bw * Math.abs(Math.cos(bry)) + bd * Math.abs(Math.sin(bry))) / 2), zr(), {
+        ry: bry, s: [bw, rand(2.5, 7), bd],
       });
     }
     const signs = Math.round(2.4 * den);
     for (let i = 0; i < signs; i++) {
       const side = Math.random() < 0.5 ? -1 : 1;
       const key = chance(0.5) ? 'neon:signA' : 'neon:signB';
-      this._place(seg, key, side * rand(10.5, 26), zr(), {
+      this._place(seg, key, side * rand(11.5, 26), zr(), {
         y: rand(5, 22), ry: side < 0 ? rand(0.9, 1.5) : rand(-1.5, -0.9),
         s: [rand(4, 9), rand(2, 4.6), 1],
       });
@@ -1919,26 +1947,29 @@ export class World {
     const pines = Math.round(6.2 * den);
     for (let i = 0; i < pines; i++) {
       const s = rand(0.7, 1.6);
-      this._place(seg, 'frost:pine', this._sideX(9.6, 62), zr(), {
+      this._place(seg, 'frost:pine', this._sideXClear(9.6, 62, 1.3 * s), zr(), {
         ry: rand(0, 6.28), s: [s, s * rand(0.85, 1.4), s],
         color: new THREE.Color().setHSL(rand(0.32, 0.42), rand(0.1, 0.3), rand(0.55, 0.8)).getHex(),
       });
     }
     const rocks = Math.round(3.2 * den);
     for (let i = 0; i < rocks; i++) {
-      this._place(seg, 'frost:rock', this._sideX(9.3, 50), zr(), {
-        y: rand(-0.4, 0), ry: rand(0, 6.28), s: rand(0.6, 2.1),
+      const fs2 = rand(0.6, 2.1);
+      this._place(seg, 'frost:rock', this._sideXClear(9.3, 50, 1.5 * fs2), zr(), {
+        y: rand(-0.4, 0), ry: rand(0, 6.28), s: fs2,
       });
     }
     const drifts = Math.round(3.4 * den);
     for (let i = 0; i < drifts; i++) {
-      this._place(seg, 'frost:drift', this._sideX(9.1, 44), zr(), {
-        y: -0.7, ry: rand(0, 6.28), s: [rand(1, 2.6), rand(0.6, 1.4), rand(1, 2.2)],
+      const dx = rand(1, 2.6), dz = rand(1, 2.2);
+      this._place(seg, 'frost:drift', this._sideXClear(9.1, 44, 1.6 * Math.max(dx, dz)), zr(), {
+        y: -0.7, ry: rand(0, 6.28), s: [dx, rand(0.6, 1.4), dz],
       });
     }
     if (chance(0.55 * den)) {
-      this._place(seg, 'frost:ice', this._sideX(18, 70), zr(), {
-        y: 0.02, ry: rand(0, 6.28), s: [rand(12, 34), 1, rand(10, 26)],
+      const iw = rand(12, 34), id = rand(10, 26);
+      this._place(seg, 'frost:ice', this._sideXClear(18, 70, Math.hypot(iw, id) / 2), zr(), {
+        y: 0.02, ry: rand(0, 6.28), s: [iw, 1, id],
       });
     }
   }
@@ -1948,14 +1979,15 @@ export class World {
     const spikes = Math.round(4.4 * den);
     for (let i = 0; i < spikes; i++) {
       const s = rand(0.6, 1.6);
-      this._place(seg, 'inferno:spike', this._sideX(9.6, 66), zr(), {
+      this._place(seg, 'inferno:spike', this._sideXClear(9.6, 66, 1.5 * s), zr(), {
         ry: rand(0, 6.28), rx: rand(-0.12, 0.12), s: [s, s * rand(0.7, 1.8), s],
       });
     }
     const pools = Math.round(2.2 * den);
     for (let i = 0; i < pools; i++) {
-      this._place(seg, 'inferno:lava', this._sideX(11, 70), zr(), {
-        y: 0.03, ry: rand(0, 6.28), s: [rand(6, 26), 1, rand(6, 20)],
+      const lw = rand(6, 26), ld = rand(6, 20);
+      this._place(seg, 'inferno:lava', this._sideXClear(11, 70, Math.hypot(lw, ld) / 2), zr(), {
+        y: 0.03, ry: rand(0, 6.28), s: [lw, 1, ld],
       });
     }
     const crystals = Math.round(2.8 * den);

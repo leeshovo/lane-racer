@@ -1,0 +1,26 @@
+name: Datenbank wachhalten
+
+# Das Spiel selbst (GitHub Pages) läuft immer. Die kostenlose Supabase-Datenbank wird aber pausiert, wenn eine Woche lang
+# niemand darauf zugreift. Dieser Job fragt sie alle 8 Stunden kurz ab (die Wochenwertung), damit das nie passiert.
+# Hinweis: GitHub schaltet geplante Jobs ab, wenn im Repository 60 Tage lang nichts passiert – dann einfach einmal
+# im Reiter "Actions" auf "Run workflow" drücken oder irgendetwas committen.
+on:
+  schedule:
+    - cron: '17 */8 * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Datenbank abfragen
+        run: |
+          set -e
+          # Der Schlüssel ist der öffentliche "Publishable Key" (steht auch in js/config.js)
+          code=$(curl -s -o /tmp/out.json -w '%{http_code}' -X POST \
+            'https://lqiogfahydzgydiyalpp.supabase.co/rest/v1/rpc/week_info' \
+            -H 'apikey: sb_publishable_NbGjB3FtbqU_c_x5eHJXOw_35eIjDmM' \
+            -H 'Content-Type: application/json' -d '{}')
+          echo "Antwort: $code"
+          cat /tmp/out.json; echo
+          test "$code" = "200"

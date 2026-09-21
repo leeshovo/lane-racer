@@ -1,6 +1,7 @@
 // Tests für Sicherungscode, Tages-Kennung, Spielstand-Snapshot und Missionen.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { RESET_EPOCH } from '../js/config.js';
 import {
   makeRecoveryCode, parseRecoveryCode, dailyKey, dailyRaceId, secondsUntilNextDaily, normalizePartyCode, generatePartyCode,
 } from '../js/online.js';
@@ -88,7 +89,7 @@ describe('Spielstand', () => {
 
   it('wirft Unsinn aus manipulierten Snapshots raus', () => {
     const p = defaultProfile();
-    adoptSnapshot(p, { coins: -50, owned: ['blitz', 'ufo', 42], selectedCar: 'ufo', colors: { blitz: '#123456' }, stats: { runs: 'viele' }, missions: [{ id: 'gibtsnicht' }] });
+    adoptSnapshot(p, { epoch: RESET_EPOCH, coins: -50, owned: ['blitz', 'ufo', 42], selectedCar: 'ufo', colors: { blitz: '#123456' }, stats: { runs: 'viele' }, missions: [{ id: 'gibtsnicht' }] });
     assert.equal(p.coins, 0);
     assert.deepEqual(p.owned, ['blitz']);
     assert.equal(p.selectedCar, 'blitz');
@@ -100,9 +101,10 @@ describe('Spielstand', () => {
   it('Fortschritt wächst monoton (auch nach Käufen)', () => {
     const p = defaultProfile();
     applyRun(p, { distance: 3000, coinsCollected: 500, nearMisses: 0, nearMissCoins: 0, smashed: 0, smashCoins: 0, overtakes: 0, level: 3, nitroUses: 0 });
+    p.coins = 2000; // Autos kosten mehr, Guthaben aufstocken
     const before = progressOf(p);
     assert.ok(buyCar(p, 'kiwi').ok);
-    assert.ok(p.coins < 500, 'Guthaben sinkt beim Kauf');
+    assert.ok(p.coins < 2000, 'Guthaben sinkt beim Kauf');
     assert.equal(progressOf(p), before, 'Fortschritt bleibt');
   });
 });

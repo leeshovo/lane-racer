@@ -1,6 +1,7 @@
 // Tests: Die letzte Party wird gemerkt, Einstellungs-Reiter und Hinweise sind stimmig.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { RESET_EPOCH } from '../js/config.js';
 import { loadProfile, defaultProfile, adoptSnapshot, snapshotOf, PARTY_MEMORY_MS } from '../js/storage.js';
 import { SETTINGS_GROUPS, DEFAULT_SETTINGS, sanitizeSettings } from '../js/config.js';
 
@@ -12,18 +13,18 @@ function withStored(value, fn) {
 describe('Letzte Party', () => {
   it('bleibt erhalten, solange sie frisch und gültig ist', () => {
     const at = Date.now() - 3600 * 1000;
-    const p = withStored({ lastParty: { code: 'ABCDE', at } }, loadProfile);
+    const p = withStored({ epoch: RESET_EPOCH, lastParty: { code: 'ABCDE', at } }, loadProfile);
     assert.deepEqual(p.lastParty, { code: 'ABCDE', at });
   });
 
   it('verfällt nach 14 Tagen', () => {
-    const p = withStored({ lastParty: { code: 'ABCDE', at: Date.now() - PARTY_MEMORY_MS - 1000 } }, loadProfile);
+    const p = withStored({ epoch: RESET_EPOCH, lastParty: { code: 'ABCDE', at: Date.now() - PARTY_MEMORY_MS - 1000 } }, loadProfile);
     assert.equal(p.lastParty, null);
   });
 
   it('ungültige Einträge werden verworfen', () => {
     for (const bad of [{ code: 'ab', at: Date.now() }, { code: '<script>', at: Date.now() }, { code: 'ABCDE', at: 'gestern' }, 'ABCDE', 42, null]) {
-      assert.equal(withStored({ lastParty: bad }, loadProfile).lastParty, null, JSON.stringify(bad));
+      assert.equal(withStored({ epoch: RESET_EPOCH, lastParty: bad }, loadProfile).lastParty, null, JSON.stringify(bad));
     }
   });
 

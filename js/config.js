@@ -3,6 +3,12 @@
  * Einheiten: Meter, Sekunden, m/s (× 3,6 = km/h). Fahrtrichtung = -z.
  */
 
+/**
+ * Spielstand-Generation. Wird sie geändert, verwirft jedes Gerät beim nächsten Besuch seinen lokalen Spielstand
+ * (Einstellungen bleiben) und fragt den Namen neu ab. Zusammen mit dem Leeren der Datenbank ein kompletter Neustart.
+ */
+export const RESET_EPOCH = '2026-09-21-b';
+
 export const VERSION = '2.6.0';
 
 // Öffentliche Supabase-Zugangsdaten (Publishable Key darf im Browser stehen –
@@ -182,49 +188,49 @@ export const CARS = [
     stats: { speed: 1.0, handling: 1.0, nitro: 1.0 }, perk: null,
   },
   {
-    id: 'kiwi', name: 'Kiwi', model: 'hatch', price: 300,
+    id: 'kiwi', name: 'Kiwi', model: 'hatch', price: 900,
     ability: { id: 'pulse',     name: 'Münzsog',      text: 'Saugt alle Münzen der nächsten 50 m an',                 cooldown: 20, duration: 0 },
     description: 'Kleiner Stadtflitzer, lenkt wie auf Schienen.',
     colors: ['#8bd346', '#ff7eb6', '#4d9de0', '#f4f6fa'],
     stats: { speed: 0.97, handling: 1.18, nitro: 1.0 }, perk: 'coinBonus',
   },
   {
-    id: 'bulldog', name: 'Bulldog', model: 'muscle', price: 800,
+    id: 'bulldog', name: 'Bulldog', model: 'muscle', price: 2400,
     ability: { id: 'ram',       name: 'Rammbock',     text: '3 s unverwundbar: Autos fliegen zur Seite',              cooldown: 30, duration: 3 },
     description: 'V8-Muskelpaket. Rammt mit Nitro doppelt ertragreich.',
     colors: ['#1d3fbb', '#c1121f', '#111418', '#ffc93c'],
     stats: { speed: 1.06, handling: 0.92, nitro: 1.1 }, perk: 'smashPlus',
   },
   {
-    id: 'rancher', name: 'Rancher', model: 'pickup', price: 1500,
+    id: 'rancher', name: 'Rancher', model: 'pickup', price: 4500,
     ability: { id: 'repair',    name: 'Reparatur',    text: 'Schutzschild sofort wiederherstellen',                   cooldown: 40, duration: 0 },
     description: 'Robuster Pick-up. Startet jede Runde mit Schutzschild.',
     colors: ['#6b705c', '#b5651d', '#264653', '#e9ecef'],
     stats: { speed: 0.95, handling: 0.95, nitro: 1.0 }, perk: 'startShield',
   },
   {
-    id: 'sheriff', name: 'Sheriff', model: 'police', price: 2500,
+    id: 'sheriff', name: 'Sheriff', model: 'police', price: 7500,
     ability: { id: 'siren',     name: 'Sirene',       text: '4 s lang macht der Verkehr Platz und fährt schneller',   cooldown: 30, duration: 4 },
     description: 'Abfangjäger mit Blaulicht. Startet mit halbem Nitro.',
     colors: ['#f4f6fa', '#111418', '#1d3fbb', '#2d6a4f'],
     stats: { speed: 1.05, handling: 1.05, nitro: 1.1 }, perk: 'nitroStart',
   },
   {
-    id: 'neon', name: 'Neon GT', model: 'gt', price: 4000,
+    id: 'neon', name: 'Neon GT', model: 'gt', price: 12000,
     ability: { id: 'phase',     name: 'Phasensprung', text: '1,8 s durch alles hindurch fahren',                      cooldown: 25, duration: 1.8 },
     description: 'Leuchtender Unterboden. Beinahe-Unfälle füllen mehr Nitro.',
     colors: ['#b517ff', '#00e5ff', '#ff2e88', '#1a1a2e'],
     stats: { speed: 1.1, handling: 1.05, nitro: 1.15 }, perk: 'nearMissPlus',
   },
   {
-    id: 'rakete', name: 'Rakete F1', model: 'formula', price: 6500,
+    id: 'rakete', name: 'Rakete F1', model: 'formula', price: 19500,
     ability: { id: 'overdrive', name: 'Overdrive',    text: '5 s lang +30 % Höchsttempo und Beschleunigung',          cooldown: 30, duration: 5 },
     description: 'Formelwagen. Pure Werte, keine Kompromisse.',
     colors: ['#e10600', '#00a19b', '#ff8700', '#f4f6fa'],
     stats: { speed: 1.15, handling: 1.22, nitro: 1.1 }, perk: null,
   },
   {
-    id: 'phantom', name: 'Phantom X', model: 'hover', price: 10000,
+    id: 'phantom', name: 'Phantom X', model: 'hover', price: 30000,
     ability: { id: 'hop',       name: 'Schwebesprung', text: 'Springt in hohem Bogen über den Verkehr',               cooldown: 22, duration: 1.4 },
     description: 'Schwebt statt zu rollen. Eingebauter Münzmagnet.',
     colors: ['#c0c7d1', '#ffd700', '#00ffa3', '#ff3b4e'],

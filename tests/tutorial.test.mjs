@@ -1,6 +1,7 @@
 // Tests für die Tipps der ersten Runde (reine Logik).
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { RESET_EPOCH } from '../js/config.js';
 import { Tutorial, TUTORIAL_STEPS } from '../js/tutorial.js';
 import { defaultProfile, adoptSnapshot, snapshotOf } from '../js/storage.js';
 
@@ -79,9 +80,9 @@ describe('Tutorial im Spielstand', () => {
     const { loadProfile } = await import('../js/storage.js');
     globalThis.localStorage = { getItem: () => null, setItem() {} };
     assert.equal(loadProfile().tutorialDone, false);
-    globalThis.localStorage = { getItem: () => JSON.stringify({ stats: { runs: 5 } }), setItem() {} };
+    globalThis.localStorage = { getItem: () => JSON.stringify({ epoch: RESET_EPOCH, stats: { runs: 5 } }), setItem() {} };
     assert.equal(loadProfile().tutorialDone, true);
-    globalThis.localStorage = { getItem: () => JSON.stringify({ stats: { runs: 5 }, tutorialDone: false }), setItem() {} };
+    globalThis.localStorage = { getItem: () => JSON.stringify({ epoch: RESET_EPOCH, stats: { runs: 5 }, tutorialDone: false }), setItem() {} };
     assert.equal(loadProfile().tutorialDone, false, 'ausdrücklicher Wert gewinnt');
     delete globalThis.localStorage;
   });

@@ -1,6 +1,7 @@
 // Tests für die Wochenwertung: Preise (JS = SQL), Gutschrift ohne Doppelauszahlung, Sonderpreise, Einladungslink, Online-Aufrufe.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { RESET_EPOCH } from '../js/config.js';
 import fs from 'node:fs';
 import { Online, friendCodeFromUrl, friendShareUrl } from '../js/online.js';
 import {
@@ -120,7 +121,7 @@ describe('Belohnungen gutschreiben', () => {
     assert.equal(other.trophies.gold, 1);
     assert.deepEqual(other.weekly.applied, [WEEK]);
     assert.deepEqual(applyWeeklyRewards(other, [reward({ rank: 1, coins: 1500, item: 'champion' })]), [], 'nach Gerätewechsel keine zweite Auszahlung');
-    globalThis.localStorage = { getItem: () => JSON.stringify({ trophies: { gold: -5, silver: 'x', bronze: 1e9 }, weekly: { applied: [1, {}, 'ok'] } }), setItem() {} };
+    globalThis.localStorage = { getItem: () => JSON.stringify({ epoch: RESET_EPOCH, trophies: { gold: -5, silver: 'x', bronze: 1e9 }, weekly: { applied: [1, {}, 'ok'] } }), setItem() {} };
     const l = loadProfile();
     delete globalThis.localStorage;
     assert.deepEqual(l.trophies, { gold: 0, silver: 0, bronze: 9999 });

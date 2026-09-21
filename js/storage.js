@@ -9,7 +9,7 @@
 import { sanitizeCampaign, defaultCampaign, totalStars, levelInfo, CAMPAIGN_MAPS } from './campaign.js';
 import {
   CARS, MISSION_POOL, CONFIG, DIFFICULTY_MODES, ACHIEVEMENTS, SPECIAL_COLORS, carById, DEFAULT_SETTINGS, sanitizeSettings, streakBonus,
-  WEEKLY_ITEMS,
+  WEEKLY_ITEMS, RESET_EPOCH,
 } from './config.js';
 
 const KEY = 'laneRacer2.profile';
@@ -38,6 +38,7 @@ export function defaultProfile() {
     missionTier: {},
     daily: { key: '', best: 0 }, // bester Versuch im Tagesrennen des Tages "key" (YYYYMMDD)
     settings: { ...DEFAULT_SETTINGS },
+    epoch: RESET_EPOCH,  // Generation des Spielstands (siehe RESET_EPOCH in config.js)
     tutorialDone: false, // Tipps in der ersten Runde schon gesehen?
     lastParty: null,     // { code, at } – die Party, in der man zuletzt war (wird beim Start wieder betreten)
     online: null, // { id, secret } nach der Registrierung
@@ -48,6 +49,11 @@ export function defaultProfile() {
 function normalize(stored) {
   const base = defaultProfile();
   if (!stored || typeof stored !== 'object') return ensureMissions(base);
+  if (stored.epoch !== RESET_EPOCH) {
+    // Neustart aller Spielstände: alles verwerfen, nur die Geräte-Einstellungen bleiben
+    base.settings = sanitizeSettings(stored.settings);
+    return ensureMissions(base);
+  }
 
   const p = { ...base, ...stored };
   p.stats = { ...base.stats, ...(stored.stats || {}) };
@@ -116,6 +122,7 @@ export function saveProfile(profile) {
 export function snapshotOf(profile) {
   return {
     v: 2,
+    epoch: RESET_EPOCH,
     coins: profile.coins,
     owned: [...profile.owned],
     selectedCar: profile.selectedCar,
@@ -143,8 +150,11 @@ export function progressOf(data) {
 
 /** Übernimmt einen Cloud-Snapshot in das lokale Profil (Name, Einstellungen und Online-ID bleiben). */
 export function adoptSnapshot(profile, data) {
+  // Cloud-Stände aus einer früheren Generation (vor einem Neustart aller Spielstände) werden nicht mehr übernommen
+  if (!data || data.epoch !== RESET_EPOCH) return profile;
   const merged = normalize({
     ...data,
+    epoch: RESET_EPOCH,
     name: profile.name,
     settings: profile.settings,
     online: profile.online,
