@@ -202,6 +202,13 @@ export const CARS = [
     stats: { speed: 1.06, handling: 0.92, nitro: 1.1 }, perk: 'smashPlus',
   },
   {
+    id: 'zephyr', name: 'Zephyr', model: 'roadster', price: 3600,
+    ability: { id: 'pulse',     name: 'Münzsog',      text: 'Saugt alle Münzen der nächsten 50 m an',                 cooldown: 20, duration: 0 },
+    description: 'Offener Roadster. Fahrtwind, Sonne und ein Gespür für Münzen.',
+    colors: ['#2ec4b6', '#ffc93c', '#f4f6fa', '#ff5a1f'],
+    stats: { speed: 0.99, handling: 1.12, nitro: 1.05 }, perk: 'coinBonus',
+  },
+  {
     id: 'rancher', name: 'Rancher', model: 'pickup', price: 4500,
     ability: { id: 'repair',    name: 'Reparatur',    text: 'Schutzschild sofort wiederherstellen',                   cooldown: 40, duration: 0 },
     description: 'Robuster Pick-up. Startet jede Runde mit Schutzschild.',
@@ -216,11 +223,25 @@ export const CARS = [
     stats: { speed: 1.05, handling: 1.05, nitro: 1.1 }, perk: 'nitroStart',
   },
   {
+    id: 'driftking', name: 'Drift King', model: 'tuner', price: 9000,
+    ability: { id: 'phase',     name: 'Phasensprung', text: '1,8 s durch alles hindurch fahren',                      cooldown: 25, duration: 1.8 },
+    description: 'Tiefergelegter Tuner mit Riesenflügel. Liegt wie ein Brett, sieht aus wie ein Poster.',
+    colors: ['#ff2bd6', '#00e5ff', '#ffc93c', '#15181d'],
+    stats: { speed: 1.05, handling: 1.28, nitro: 1.05 }, perk: 'nearMissPlus',
+  },
+  {
     id: 'neon', name: 'Neon GT', model: 'gt', price: 12000,
     ability: { id: 'phase',     name: 'Phasensprung', text: '1,8 s durch alles hindurch fahren',                      cooldown: 25, duration: 1.8 },
     description: 'Leuchtender Unterboden. Beinahe-Unfälle füllen mehr Nitro.',
     colors: ['#b517ff', '#00e5ff', '#ff2e88', '#1a1a2e'],
     stats: { speed: 1.1, handling: 1.05, nitro: 1.15 }, perk: 'nearMissPlus',
+  },
+  {
+    id: 'titan', name: 'Titan', model: 'suv', price: 15000,
+    ability: { id: 'ram',       name: 'Rammbock',     text: '3 s unverwundbar: Autos fliegen zur Seite',              cooldown: 30, duration: 3 },
+    description: 'Geländewagen mit Rammschutz und Dachlicht. Was im Weg steht, fliegt.',
+    colors: ['#3d6b35', '#c4a35a', '#2a2f38', '#e9ecef'],
+    stats: { speed: 0.97, handling: 0.9, nitro: 1.05 }, perk: 'startShield',
   },
   {
     id: 'rakete', name: 'Rakete F1', model: 'formula', price: 19500,
@@ -230,6 +251,13 @@ export const CARS = [
     stats: { speed: 1.15, handling: 1.22, nitro: 1.1 }, perk: null,
   },
   {
+    id: 'vortex', name: 'Vortex', model: 'wedge', price: 27000,
+    ability: { id: 'overdrive', name: 'Overdrive',    text: '5 s lang +30 % Höchsttempo und Beschleunigung',          cooldown: 30, duration: 5 },
+    description: 'Keilförmiger Supersportwagen, flach wie ein Messer. Für alle, die nur nach vorne schauen.',
+    colors: ['#ffd400', '#e10600', '#7c3cff', '#f4f6fa'],
+    stats: { speed: 1.17, handling: 1.15, nitro: 1.2 }, perk: 'nitroStart',
+  },
+  {
     id: 'phantom', name: 'Phantom X', model: 'hover', price: 30000,
     ability: { id: 'hop',       name: 'Schwebesprung', text: 'Springt in hohem Bogen über den Verkehr',               cooldown: 22, duration: 1.4 },
     description: 'Schwebt statt zu rollen. Eingebauter Münzmagnet.',
@@ -237,8 +265,15 @@ export const CARS = [
     stats: { speed: 1.18, handling: 1.15, nitro: 1.3 }, perk: 'magnet',
   },
   {
+    id: 'omega', name: 'Omega', model: 'hyper', price: 45000,
+    ability: { id: 'phase',     name: 'Phasensprung', text: '1,8 s durch alles hindurch fahren',                      cooldown: 20, duration: 1.8 },
+    description: 'Der ultimative Hypersportwagen. Leuchtstreifen, Karbon, Größenwahn.',
+    colors: ['#00e5ff', '#ff2bd6', '#f4f6fa', '#15181d'],
+    stats: { speed: 1.19, handling: 1.2, nitro: 1.3 }, perk: 'smashPlus',
+  },
+  {
     // Nur als Preis der Wochenwertung (Platz 1) – nicht kaufbar
-    id: 'apex', name: 'Apex Champion', model: 'formula', price: 0, exclusive: 'weekly',
+    id: 'apex', name: 'Apex Champion', model: 'hyper', price: 0, exclusive: 'weekly',
     ability: { id: 'hop', name: 'Meistersprung', text: 'Springt in hohem Bogen über den Verkehr', cooldown: 15, duration: 1.4 },
     description: 'Der Pokal auf vier Rädern. Nur für den Sieger der Wochenwertung.',
     colors: ['#FFD24A', '#f4f6fa', '#15181d'],

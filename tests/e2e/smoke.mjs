@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { RESET_EPOCH } from '../../js/config.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const TYPES = {
@@ -61,11 +62,11 @@ const browser = await launch();
 try {
   const context = await browser.newContext({ viewport: { width: 640, height: 360 } });
   // Erste Runde: Einsteiger-Tipps aktiv; Ton aus (kein Krach beim Testen)
-  await context.addInitScript(() => {
+  await context.addInitScript((epoch) => {
     if (!localStorage.getItem('laneRacer2.profile')) {
-      localStorage.setItem('laneRacer2.profile', JSON.stringify({ name: 'Tester', tutorialDone: false, settings: { music: false, sfx: false, quality: 'low' } }));
+      localStorage.setItem('laneRacer2.profile', JSON.stringify({ epoch, name: 'Tester', tutorialDone: false, settings: { music: false, sfx: false, quality: 'low' } }));
     }
-  });
+  }, RESET_EPOCH);
   await context.route(/supabase\.co/, (route) => route.abort());
   const page = await context.newPage();
   const problems = [];
@@ -159,9 +160,31 @@ try {
     await page.waitForFunction((n) => window.laneRacer.app.screen === n, name, { timeout: 5000 }).catch(() => {});
     check((await screen()) === name, `${label}-Bildschirm sichtbar`);
     if (name === 'missions') check(await page.evaluate(() => document.querySelectorAll('.ach').length >= 15), 'Erfolgsliste gefüllt');
-    if (name === 'garage') check(await page.evaluate(() => document.querySelectorAll('.car').length === 9), '9 Autos in der Garage (8 kaufbar + Wochenpreis)');
+    if (name === 'garage') check(await page.evaluate(async () => { const cfg = await import('/js/config.js'); const cars = await import('/js/cars.js'); return cfg.CARS.every((c) => { const v = cars.createPlayerCar(c.id, c.colors[0]); return v && v.object && v.object.children.length > 0; }); }), 'jedes Auto lässt sich bauen');
+    if (name === 'garage') check(await page.evaluate(() => document.querySelectorAll('.car').length === 14), '14 Autos in der Garage (13 kaufbar + Wochenpreis)');
     if (name === 'leaderboard') check(await page.evaluate(() => [...document.querySelectorAll('.tab')].map((t) => t.textContent.trim()).includes('Freunde')), 'Tab "Freunde" vorhanden');
   }
+
+  console.log('Welten');
+  const overlaps = await page.evaluate(async () => {
+    const L = window.laneRacer; const T = await import('three'); const m = new T.Matrix4(); const bb = new T.Box3(); const bad = [];
+    for (let w = 0; w < 5; w++) {
+      L.world.setWorld(w, true);
+      for (let i = 0; i < 40; i++) L.world.update(0.016, { speed: 60, distance: i * 40, camera: L.camera });
+      for (const [key, pool] of L.world.pools) {
+        const mesh = pool.mesh; if (!mesh.visible || /arch|gantry/.test(key)) continue;
+        mesh.geometry.computeBoundingBox();
+        for (let i = 0; i < pool.capacity; i++) {
+          mesh.getMatrixAt(i, m); if (m.elements[0] === 0 && m.elements[5] === 0 && m.elements[10] === 0) continue;
+          bb.copy(mesh.geometry.boundingBox).applyMatrix4(m);
+          const inner = (bb.min.x <= 0 && bb.max.x >= 0) ? 0 : Math.min(Math.abs(bb.min.x), Math.abs(bb.max.x));
+          if (inner < 8.5) bad.push(key);
+        }
+      }
+    }
+    return bad;
+  });
+  check(overlaps.length === 0, `keine Häuser, Lava, Eis oder Felsen auf der Straße (${overlaps.length} gefunden${overlaps.length ? ': ' + [...new Set(overlaps)].join(', ') : ''})`);
 
   console.log('Kampagne');
   if ((await screen()) !== 'menu') await page.evaluate(() => window.laneRacer.ui.cb.onToMenu());

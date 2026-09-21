@@ -37,6 +37,7 @@ const TIME_TAG = { dawn: 'Morgen', day: 'Mittag', dusk: 'Abend', night: 'Nacht' 
 const MODEL_LABEL = {
   coupe: 'Sportcoupé', hatch: 'Kleinwagen', muscle: 'Muscle-Car', pickup: 'Pick-up',
   police: 'Abfangjäger', gt: 'Supersportler', formula: 'Formelwagen', hover: 'Schwebegleiter',
+  wedge: 'Keil-Supersportler', roadster: 'Roadster', suv: 'Geländewagen', tuner: 'Tuner', hyper: 'Hypersportwagen',
 };
 const STAT_DEFS = [['speed', 'Tempo'], ['handling', 'Handling'], ['nitro', 'Nitro']];
 const NET_LABEL = { online: 'Online', connecting: 'Verbinde …', offline: 'Offline' };

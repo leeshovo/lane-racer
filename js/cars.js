@@ -696,6 +696,185 @@ function addExhaustFlames(b, D, origins, radius = 0.17, length = 1.15) {
   });
 }
 
+
+// ===========================================================================
+// 4b – Sportwagen aus Seitenprofilen (schräge Scheiben, flache Nasen, echte Silhouetten)
+// ===========================================================================
+
+/**
+ * Baustein aus einem Seitenprofil: pts = [[f, y], …] (f = Längsposition, vorne positiv; y = Höhe),
+ * quer zur Fahrtrichtung "width" breit. Nach dem Drehen zeigt die Front nach -Z wie bei allen Modellen.
+ */
+function PF(key, pts, width, bevel = 0.05) {
+  return cachedGeo('pf|' + key + '|' + width + '|' + bevel, () => {
+    const shape = new THREE.Shape();
+    pts.forEach(([x, y], i) => (i ? shape.lineTo(x, y) : shape.moveTo(x, y)));
+    shape.closePath();
+    const depth = Math.max(0.02, width - 2 * bevel);
+    const g = new THREE.ExtrudeGeometry(shape, {
+      depth, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 2, curveSegments: 3,
+    });
+    g.translate(0, 0, -depth / 2);
+    g.rotateY(HALF_PI);
+    return g;
+  });
+}
+
+/** Karosserie: Unterbau (Lack), Fensterband (Glas) und Dach (Lack) – oder offen als Roadster. */
+function sleekShell(b, s) {
+  const h = s.L / 2;
+  const body = [
+    [-h, s.y0], [-h, s.tailY], [s.deckF, s.deckY], [s.glassRearF, s.beltY], [s.glassFrontF, s.beltY],
+    [h - s.noseLen, s.noseTopY], [h, s.noseY], [h, s.y0],
+  ];
+  b.add('paint', PF(s.key + '-body', body, s.W, 0.06));
+  if (s.open) {
+    const f = s.glassFrontF;
+    b.add('glass', PF(s.key + '-wind', [[f, s.beltY - 0.02], [f - 0.30, s.beltY + 0.36], [f - 0.38, s.beltY + 0.36], [f - 0.10, s.beltY - 0.02]], s.W * s.glassW, 0.03));
+    b.pair('dark', RB(0.42, 0.44, 0.24, 0.07, 1), [0.36, s.beltY + 0.16, -(f - 0.95)]);
+    b.add('dark', RB(s.W * 0.7, 0.10, 0.10, 0.04, 1), [0, s.beltY + 0.12, -(s.glassRearF + 0.05)]);
+    return;
+  }
+  const glass = [[s.glassRearF, s.beltY - 0.02], [s.roofRearF, s.roofY], [s.roofFrontF, s.roofY], [s.glassFrontF, s.beltY - 0.02]];
+  b.add('glass', PF(s.key + '-glass', glass, s.W * s.glassW, 0.04));
+  const roof = [[s.roofRearF - 0.05, s.roofY - 0.03], [s.roofRearF - 0.05, s.roofY + 0.05], [s.roofFrontF + 0.05, s.roofY + 0.05], [s.roofFrontF + 0.05, s.roofY - 0.03]];
+  b.add('paint', PF(s.key + '-roof', roof, s.W * s.glassW * 0.97, 0.03));
+}
+
+/** Räder, Radläufe, Splitter, Diffusor, Leuchten, Spiegel, Auspuff – und optional Flügel, Hutze, Streifen, Neon. */
+function sleekDetails(b, D, s, o = {}) {
+  const W = s.W;
+  const h = s.L / 2;
+  const e = 0.065; // Die Abschrägung der Karosserie ragt so weit über die Profilkante hinaus
+  const seg = Math.max(10, D.radial);
+  for (const ax of [s.front, s.rear]) {
+    for (const side of [-1, 1]) {
+      b.wheel(side * (W / 2 - ax.w / 2 + 0.03), ax.r, -ax.f, ax.r, ax.w, o.tread ? { tread: true } : {});
+      b.add('dark', CY(ax.r + 0.09, ax.r + 0.09, 0.05, seg), [side * (W / 2 - 0.005), ax.r, -ax.f], [0, 0, HALF_PI]);
+    }
+  }
+  // Frontsplitter, Diffusor, Seitenschweller
+  b.add('dark', RB(W * 0.94, 0.07, 0.46, 0.03, 1), [0, s.y0 + 0.03, -(h + e - 0.12)]);
+  b.add('dark', RB(W * 0.88, 0.17, 0.40, 0.05, 1), [0, s.y0 + 0.08, h + e - 0.12]);
+  b.pair('dark', BX(0.07, 0.11, s.L * 0.42), [W / 2 - 0.015, s.y0 + 0.05, 0]);
+  // Leuchten: schmale Scheinwerfer, durchgehendes Rücklichtband
+  b.pair('head', RB(0.50, 0.075, 0.09, 0.03, 1), [W * 0.29, s.noseTopY - 0.05, -(h + e + 0.02)]);
+  b.add('tail', RB(W * 0.80, 0.06, 0.08, 0.03, 1), [0, s.tailY - 0.08, h + e + 0.025]);
+  b.pair('tail', RB(0.34, 0.13, 0.08, 0.03, 1), [W * 0.34, s.tailY - 0.12, h + e + 0.025]);
+  // Spiegel
+  if (!o.noMirrors) b.pair('dark', RB(0.19, 0.09, 0.13, 0.03, 1), [W / 2 + 0.04, s.beltY + 0.16, -(s.glassFrontF - 0.22)]);
+  // Auspuff
+  const ex = o.exhaust || [0.42];
+  for (const x of ex) b.pair('chrome', CY(0.07, 0.07, 0.18, 8), [x, s.y0 + 0.13, h + e + 0.02], [HALF_PI, 0, 0]);
+  // Heckflügel
+  if (o.wing) {
+    const wy = o.wing.y;
+    b.add('accent', RB(W * (o.wing.span || 0.92), 0.09, o.wing.chord || 0.44, 0.03, 1), [0, wy, h - 0.30]);
+    b.pair('dark', BX(0.08, wy - s.tailY + 0.02, 0.16), [W * 0.30, (wy + s.tailY) / 2, h - 0.30]);
+    b.pair('paint', BX(0.06, 0.20, (o.wing.chord || 0.44) + 0.06), [W * (o.wing.span || 0.92) / 2, wy + 0.05, h - 0.30]);
+  }
+  // Lufthutze auf der Motorhaube
+  if (o.scoop) b.add('dark', RB(0.56, 0.14, 0.86, 0.05, 1), [0, s.noseTopY + 0.10, -(h - s.noseLen - 0.3)]);
+  // Seitliche Lufteinlässe hinter der Tür
+  if (o.intakes) b.pair('dark', RB(0.14, 0.22, 0.62, 0.05, 1), [W / 2 - 0.01, s.beltY - 0.10, -(s.glassRearF + 0.10)]);
+  // Rennstreifen über Dach und Motorhaube
+  if (o.stripes && !s.open) {
+    const cx = (s.roofRearF + s.roofFrontF) / 2;
+    b.pair('accent', BX(0.17, 0.02, s.roofFrontF - s.roofRearF + 0.06), [0.23, s.roofY + 0.058, -cx]);
+    const df = (h - s.noseLen) - s.glassFrontF;
+    const dy = s.noseTopY - s.beltY;
+    const len = Math.hypot(df, dy);
+    b.pair('accent', BX(0.17, 0.02, len), [0.23, (s.beltY + s.noseTopY) / 2 + 0.05, -(s.glassFrontF + df / 2)], [Math.atan2(dy, df), 0, 0]);
+  }
+  // Neon-Zierleiste und Unterbodenlicht in Lackfarbe
+  if (o.neon) {
+    b.pair('neon', BX(0.04, 0.05, s.L * 0.5), [W / 2 + 0.005, s.y0 + 0.16, 0]);
+    b.add('neon', BX(W * 0.8, 0.04, 0.05), [0, s.y0 + 0.10, -(h + e - 0.03)]);
+  }
+  if (o.underglow) {
+    b.part('underglow', 'glow', xf(PL(W + 1.2, s.L + 1.0), [0, 0.035, 0], [-HALF_PI, 0, 0]), { cast: false, root: true, dyn: true, renderOrder: 2 });
+  }
+  b.named.push(beamPart([[-W * 0.29, s.noseTopY - 0.05, -(h + e)], [W * 0.29, s.noseTopY - 0.05, -(h + e)]], 15, 1.5, D));
+  addExhaustFlames(b, D, ex.length > 1 || o.twinFlames ? [[-ex[0], s.y0 + 0.13, h + e + 0.14], [ex[0], s.y0 + 0.13, h + e + 0.14]] : [[0, s.y0 + 0.13, h + e + 0.14]], 0.17, 1.15);
+  return { underglow: Boolean(o.underglow) };
+}
+
+const SLEEK = {
+  coupe: {
+    key: 'coupe', L: 4.2, W: 1.88, y0: 0.30, tailY: 0.86, deckF: -1.55, deckY: 0.98, glassRearF: -0.95, beltY: 1.00, glassFrontF: 0.45,
+    noseLen: 0.55, noseTopY: 0.68, noseY: 0.54, roofY: 1.36, roofRearF: -0.6, roofFrontF: 0.02, glassW: 0.84,
+    front: { f: 1.34, r: 0.34, w: 0.28 }, rear: { f: -1.36, r: 0.35, w: 0.30 },
+  },
+  hatch: {
+    key: 'hatch', L: 3.9, W: 1.84, y0: 0.30, tailY: 1.02, deckF: -1.80, deckY: 1.12, glassRearF: -1.45, beltY: 1.04, glassFrontF: 0.70,
+    noseLen: 0.5, noseTopY: 0.76, noseY: 0.56, roofY: 1.52, roofRearF: -1.35, roofFrontF: 0.30, glassW: 0.86,
+    front: { f: 1.22, r: 0.31, w: 0.26 }, rear: { f: -1.24, r: 0.31, w: 0.26 },
+  },
+  muscle: {
+    key: 'muscle', L: 4.5, W: 1.98, y0: 0.32, tailY: 0.96, deckF: -1.75, deckY: 1.04, glassRearF: -0.95, beltY: 1.08, glassFrontF: 0.15,
+    noseLen: 0.35, noseTopY: 1.02, noseY: 0.80, roofY: 1.44, roofRearF: -0.75, roofFrontF: -0.05, glassW: 0.82,
+    front: { f: 1.55, r: 0.35, w: 0.28 }, rear: { f: -1.42, r: 0.39, w: 0.36 },
+  },
+  gt: {
+    key: 'gt', L: 4.3, W: 1.94, y0: 0.28, tailY: 0.80, deckF: -1.40, deckY: 0.90, glassRearF: -0.70, beltY: 0.90, glassFrontF: 0.60,
+    noseLen: 0.62, noseTopY: 0.56, noseY: 0.42, roofY: 1.22, roofRearF: -0.40, roofFrontF: 0.16, glassW: 0.84,
+    front: { f: 1.38, r: 0.35, w: 0.30 }, rear: { f: -1.36, r: 0.37, w: 0.34 },
+  },
+  wedge: {
+    key: 'wedge', L: 4.4, W: 2.02, y0: 0.26, tailY: 0.78, deckF: -1.30, deckY: 0.84, glassRearF: -0.45, beltY: 0.80, glassFrontF: 1.05,
+    noseLen: 1.0, noseTopY: 0.48, noseY: 0.34, roofY: 1.10, roofRearF: -0.18, roofFrontF: 0.55, glassW: 0.86,
+    front: { f: 1.42, r: 0.34, w: 0.30 }, rear: { f: -1.30, r: 0.36, w: 0.36 },
+  },
+  roadster: {
+    key: 'roadster', L: 4.0, W: 1.84, y0: 0.30, tailY: 0.86, deckF: -1.00, deckY: 0.94, glassRearF: -0.55, beltY: 0.94, glassFrontF: 0.50,
+    noseLen: 0.55, noseTopY: 0.70, noseY: 0.52, roofY: 0, roofRearF: 0, roofFrontF: 0, glassW: 0.84, open: true,
+    front: { f: 1.28, r: 0.33, w: 0.26 }, rear: { f: -1.28, r: 0.34, w: 0.28 },
+  },
+  suv: {
+    key: 'suv', L: 4.5, W: 2.10, y0: 0.52, tailY: 1.42, deckF: -2.05, deckY: 1.48, glassRearF: -1.95, beltY: 1.30, glassFrontF: 0.55,
+    noseLen: 0.4, noseTopY: 1.16, noseY: 1.0, roofY: 2.02, roofRearF: -1.90, roofFrontF: 0.32, glassW: 0.88,
+    front: { f: 1.50, r: 0.52, w: 0.40 }, rear: { f: -1.42, r: 0.52, w: 0.40 },
+  },
+  tuner: {
+    key: 'tuner', L: 4.5, W: 1.94, y0: 0.28, tailY: 0.92, deckF: -1.78, deckY: 0.96, glassRearF: -0.90, beltY: 0.98, glassFrontF: 0.78,
+    noseLen: 0.55, noseTopY: 0.72, noseY: 0.52, roofY: 1.36, roofRearF: -0.52, roofFrontF: 0.30, glassW: 0.84,
+    front: { f: 1.45, r: 0.34, w: 0.30 }, rear: { f: -1.42, r: 0.35, w: 0.34 },
+  },
+  hyper: {
+    key: 'hyper', L: 4.5, W: 2.0, y0: 0.26, tailY: 0.74, deckF: -1.6, deckY: 0.80, glassRearF: -0.55, beltY: 0.80, glassFrontF: 0.72,
+    noseLen: 1.0, noseTopY: 0.50, noseY: 0.34, roofY: 1.12, roofRearF: -0.22, roofFrontF: 0.32, glassW: 0.82,
+    front: { f: 1.44, r: 0.34, w: 0.30 }, rear: { f: -1.40, r: 0.37, w: 0.36 },
+  },
+};
+
+function buildSleek(name, opts) {
+  return (b, D) => {
+    const s = SLEEK[name];
+    sleekShell(b, s);
+    const r = sleekDetails(b, D, s, opts);
+    if (opts.chromeBumpers) {
+      b.add('chrome', RB(s.W * 0.92, 0.14, 0.12, 0.04, 1), [0, s.y0 + 0.16, -(s.L / 2 + 0.09)]);
+      b.add('chrome', RB(s.W * 0.92, 0.14, 0.12, 0.04, 1), [0, s.y0 + 0.16, s.L / 2 + 0.09]);
+    }
+    if (opts.rack) {
+      b.add('accent', BX(s.W * 0.7, 0.05, 1.5), [0, s.roofY + 0.10, -((s.roofRearF + s.roofFrontF) / 2)]);
+      b.add('neon', BX(s.W * 0.66, 0.06, 0.08), [0, s.roofY + 0.16, -(s.roofFrontF + 0.05)]);
+      b.add('chrome', RB(s.W * 0.9, 0.18, 0.10, 0.04, 1), [0, s.y0 + 0.22, -(s.L / 2 + 0.11)]);
+    }
+    return b.bake([s.W + 0.06, s.roofY ? s.roofY + 0.12 : s.beltY + 0.5, s.L + 0.06], r.underglow ? { underglow: true } : {});
+  };
+}
+
+const BUILD_COUPE = buildSleek('coupe', { wing: { y: 1.16 }, stripes: true, exhaust: [0.44], twinFlames: true });
+const BUILD_HATCH = buildSleek('hatch', { intakes: false, exhaust: [0.5] });
+const BUILD_MUSCLE = buildSleek('muscle', { scoop: true, stripes: true, chromeBumpers: true, exhaust: [0.52], twinFlames: true, wing: { y: 1.10, span: 0.86, chord: 0.34 } });
+const BUILD_GT = buildSleek('gt', { wing: { y: 1.40, span: 0.96 }, intakes: true, neon: true, underglow: true, exhaust: [0.34], twinFlames: true });
+const BUILD_WEDGE = buildSleek('wedge', { wing: { y: 1.34, span: 1.0, chord: 0.5 }, intakes: true, neon: true, underglow: true, exhaust: [0.30], twinFlames: true });
+const BUILD_ROADSTER = buildSleek('roadster', { stripes: false, exhaust: [0.42], twinFlames: true });
+const BUILD_SUV = buildSleek('suv', { rack: true, tread: true, exhaust: [0.6], noMirrors: false });
+const BUILD_TUNER = buildSleek('tuner', { wing: { y: 1.28, span: 1.0, chord: 0.5 }, stripes: true, neon: true, exhaust: [0.5], twinFlames: true });
+const BUILD_HYPER = buildSleek('hyper', { wing: { y: 1.26, span: 0.98, chord: 0.4 }, intakes: true, neon: true, underglow: true, stripes: true, exhaust: [0.28], twinFlames: true });
+
 // ===========================================================================
 // 5 – Verkehrsmodelle (max. 10 Meshes pro Fahrzeug)
 // ===========================================================================
@@ -894,14 +1073,19 @@ function buildTrafficAmbulance(b, D) {
 // ===========================================================================
 
 const PLAYER_BUILDERS = {
-  coupe: buildCoupe,
-  hatch: buildHatch,
-  muscle: buildMuscle,
+  coupe: BUILD_COUPE,
+  hatch: BUILD_HATCH,
+  muscle: BUILD_MUSCLE,
   pickup: buildPickup,
   police: buildPoliceCar,
-  gt: buildGt,
+  gt: BUILD_GT,
   formula: buildFormula,
   hover: buildHover,
+  wedge: BUILD_WEDGE,
+  roadster: BUILD_ROADSTER,
+  suv: BUILD_SUV,
+  tuner: BUILD_TUNER,
+  hyper: BUILD_HYPER,
 };
 
 const TRAFFIC_BUILDERS = {
