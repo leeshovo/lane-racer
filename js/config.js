@@ -3,7 +3,7 @@
  * Einheiten: Meter, Sekunden, m/s (× 3,6 = km/h). Fahrtrichtung = -z.
  */
 
-export const VERSION = '2.1.0';
+export const VERSION = '2.2.0';
 
 // Öffentliche Supabase-Zugangsdaten (Publishable Key darf im Browser stehen –
 // geschützt wird über Row Level Security und geprüfte Server-Funktionen).
@@ -130,6 +130,20 @@ export const WORLDS = [
   { id: 'inferno', name: 'Vulkan',     tagline: 'Lava links, Lava rechts' },
 ];
 export const LEVELS_PER_WORLD = 3;
+
+// Tageszeiten, aus denen pro Runde (nach Seed, also in Party-Rennen für alle gleich) eine gewählt wird.
+// 'default' = Grundstimmung der Welt (Sonnental: Tag, Canyon: Abendrot, Neon City und Vulkan: Nacht).
+export const WORLD_TIMES = {
+  meadow: ['default', 'dawn', 'dusk', 'night'],
+  canyon: ['default', 'day', 'night'],
+  neon: ['default'],
+  frost: ['default', 'dawn', 'dusk', 'night'],
+  inferno: ['default'],
+};
+export const TIME_LABELS = { default: '', day: 'Mittag', dawn: 'Morgen', dusk: 'Abend', night: 'Nacht' };
+
+// Farbe des Hügels über Tunneln je Welt
+export const WORLD_HILL_COLOR = { meadow: 0x4c7a34, canyon: 0x9a5a38, neon: 0x2a2f3c, frost: 0xe4edf6, inferno: 0x2a1512 };
 
 // Wie stark die Straße pro Welt kurvt (x) und über Hügel führt (y): Versatz in Metern in 215 m Entfernung.
 export const WORLD_BEND = {
@@ -267,3 +281,94 @@ export const MISSION_POOL = [
 ];
 
 export const EMOTES = ['👍', '🔥', '😂', '😱', '🏁', '💀'];
+
+// ---------------------------------------------------------------------------
+// Einstellungen: EINE Liste für Oberfläche, Speicher und Spiel.
+// Wer eine Option hinzufügen will, ergänzt sie hier und wertet sie in main.js aus.
+//   type 'switch' = An/Aus, 'range' = Regler 0–100 % (Wert 0–1), 'seg' = Auswahl
+//   requires = wird ausgegraut, solange der genannte Schalter aus ist
+// ---------------------------------------------------------------------------
+export const DEFAULT_SETTINGS = {
+  // Ton
+  music: true,
+  sfx: true,
+  volume: 0.8,
+  musicVolume: 0.7,
+  sfxVolume: 0.9,
+  engineVolume: 0.6,
+  muteInBackground: true,
+  // Grafik und Effekte
+  quality: 'auto',
+  bend: true,
+  bloom: true,
+  speedFx: true,
+  shake: 'normal',
+  fps: false,
+  // Anzeige und Steuerung
+  unit: 'kmh',
+  keyHints: true,
+  vibrate: true,
+  autoPause: true,
+};
+
+export const SETTINGS_GROUPS = [
+  {
+    id: 'sound',
+    title: 'Ton',
+    items: [
+      { key: 'music', type: 'switch', label: 'Musik', desc: 'Synthwave-Soundtrack je Welt' },
+      { key: 'sfx', type: 'switch', label: 'Soundeffekte', desc: 'Motor, Münzen, Crashs' },
+      { key: 'volume', type: 'range', label: 'Gesamtlautstärke' },
+      { key: 'musicVolume', type: 'range', label: 'Musik', requires: 'music' },
+      { key: 'sfxVolume', type: 'range', label: 'Effekte', requires: 'sfx' },
+      { key: 'engineVolume', type: 'range', label: 'Motorgeräusch', requires: 'sfx' },
+      { key: 'muteInBackground', type: 'switch', label: 'Im Hintergrund stumm', desc: 'Der Ton stoppt, sobald du den Tab oder das Fenster wechselst' },
+    ],
+  },
+  {
+    id: 'graphics',
+    title: 'Grafik und Effekte',
+    items: [
+      {
+        key: 'quality', type: 'seg', label: 'Grafikqualität',
+        desc: 'Auto passt sich deinem Gerät an. Eine Änderung lädt das Spiel kurz neu.',
+        options: [['auto', 'Auto'], ['high', 'Hoch'], ['medium', 'Mittel'], ['low', 'Niedrig']],
+      },
+      { key: 'bend', type: 'switch', label: 'Kurven und Hügel', desc: 'Die Straße schwingt seitlich und über Kuppen' },
+      { key: 'bloom', type: 'switch', label: 'Leuchteffekte', desc: 'Glühen von Lichtern, Neon und Lava' },
+      { key: 'speedFx', type: 'switch', label: 'Tempo-Effekte', desc: 'Tempo-Striche und weiterer Blickwinkel bei hoher Geschwindigkeit' },
+      { key: 'shake', type: 'seg', label: 'Kamerawackeln', options: [['off', 'Aus'], ['low', 'Schwach'], ['normal', 'Normal']] },
+      { key: 'fps', type: 'switch', label: 'Bildrate anzeigen', desc: 'Kleiner Zähler oben in der Mitte' },
+    ],
+  },
+  {
+    id: 'display',
+    title: 'Anzeige und Steuerung',
+    items: [
+      { key: 'unit', type: 'seg', label: 'Tempo-Einheit', options: [['kmh', 'km/h'], ['mph', 'mph']] },
+      { key: 'keyHints', type: 'switch', label: 'Tastenhinweise', desc: 'Tipps zu den Tasten im Menü und während der Fahrt' },
+      { key: 'autoPause', type: 'switch', label: 'Automatisch pausieren', desc: 'Das Spiel hält an, wenn du das Fenster verlässt' },
+      { key: 'vibrate', type: 'switch', label: 'Vibration', desc: 'Handy vibriert bei Crash, Nitro und Rammen' },
+    ],
+  },
+];
+
+/** Macht aus beliebigen gespeicherten Einstellungen eine gültige Menge (fehlende Werte → Standard, Unsinn → Standard). */
+export function sanitizeSettings(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const out = { ...DEFAULT_SETTINGS };
+  for (const group of SETTINGS_GROUPS) {
+    for (const item of group.items) {
+      const value = src[item.key];
+      if (item.type === 'switch') {
+        if (typeof value === 'boolean') out[item.key] = value;
+      } else if (item.type === 'range') {
+        const n = Number(value);
+        if (Number.isFinite(n)) out[item.key] = Math.min(1, Math.max(0, n));
+      } else if (item.type === 'seg') {
+        if (item.options.some(([option]) => option === value)) out[item.key] = value;
+      }
+    }
+  }
+  return out;
+}

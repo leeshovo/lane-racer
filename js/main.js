@@ -5,7 +5,10 @@
  * Hier liegen Game-Loop, Kamera, Eingabe, Menü-Ablauf, Spielstand und Party.
  */
 import * as THREE from 'three';
-import { CONFIG, SUPABASE, CARS, PERKS, WORLDS, POWERUPS, carById, VERSION } from './config.js';
+import {
+  CONFIG, SUPABASE, CARS, PERKS, WORLDS, POWERUPS, carById, VERSION, DEFAULT_SETTINGS, sanitizeSettings,
+  WORLD_TIMES, TIME_LABELS, WORLD_HILL_COLOR,
+} from './config.js';
 import {
   loadProfile, saveProfile, buyCar, selectCar, setCarColor, colorOf, applyRun, selectedCarOf,
   snapshotOf, adoptSnapshot, progressOf,
@@ -17,7 +20,9 @@ import {
   Online, partyCodeFromUrl, partyShareUrl, normalizePartyCode, generatePartyCode,
   dailyKey, dailyRaceId, makeRecoveryCode, parseRecoveryCode,
 } from './online.js';
-import { updateBend } from './bend.js';
+import { updateBend, setBendEnabled } from './bend.js';
+import { Structures } from './structures.js';
+import { hashSeed } from './rng.js';
 import { UI } from './ui.js';
 import { Game } from './game.js';
 
@@ -59,6 +64,7 @@ let scene;
 let camera;
 let world;
 let effects;
+let structures;
 let game;
 const audio = new AudioManager();
 const online = new Online({ url: SUPABASE.url, key: SUPABASE.key });
@@ -96,6 +102,7 @@ const ui = new UI({
     onShareInvite: () => shareInvite(),
     onEmote: (emoji) => app.party?.sendEmote(emoji),
     onSettingsChange: (partial) => changeSettings(partial),
+    onSettingsReset: () => resetSettings(),
     onPause: () => setPaused(true),
     onResume: () => setPaused(false),
     onRestart: () => restartRun(),
@@ -120,6 +127,7 @@ const MAX_PIXEL_RATIO = quality === 'low' ? 1 : quality === 'medium' ? 1.5 : 2;
 let pixelRatio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
 
 function boot() {
+  window.__bootDone = true; // beendet den Ladebalken aus index.html
   ui.showScreen('loading');
   ui.setLoading('Motor wird vorgeglüht …');
 
@@ -144,6 +152,7 @@ function boot() {
 
   world = new World({ scene, renderer, quality });
   world.setWorld(0, true);
+  structures = new Structures({ scene, quality });
   effects = new Effects({ renderer, scene, camera, quality });
   effects.setSize(window.innerWidth, window.innerHeight);
 
@@ -152,6 +161,9 @@ function boot() {
   game.idle();
 
   audio.setSettings(profile.settings);
+  audio.setBackground(isBackground());
+  ui.renderSettings(profile.settings);
+  applyVisualSettings();
   applyCameraLayout();
 
   // Online-Verbindung im Hintergrund aufbauen – das Spiel läuft auch offline
@@ -184,7 +196,7 @@ function boot() {
   registerServiceWorker();
 
   // Für Neugierige in der Browser-Konsole
-  window.laneRacer = { VERSION, app, profile, game, world, effects, audio, online, ui, camera, renderer, frame };
+  window.laneRacer = { VERSION, app, profile, game, world, effects, audio, online, ui, camera, renderer, structures, frame };
 }
 
 // ===========================================================================
@@ -194,6 +206,7 @@ let lastTime = performance.now();
 let worldDistance = 0;
 let liveCache = null;
 let liveCacheAt = 0;
+let structureStyleKey = '';
 const perf = { sum: 0, frames: 0, slowFor: 0 };
 
 function frame(now) {
@@ -217,11 +230,22 @@ function frame(now) {
   const driving = game.state === 'playing' || game.state === 'countdown' || game.state === 'crashed';
   updateBend(driving ? game.distance : worldDistance * 0.4, world.worldIndex, running ? dt : 0);
 
+  // Tunnel und Brücken (nur während der Fahrt) und deren Farben nach Welt und Tageszeit
+  if (structures.enabled !== driving) structures.setEnabled(driving);
+  structures.update(game.distance);
+  const styleKey = `${world.worldIndex}:${world.isNight}`;
+  if (styleKey !== structureStyleKey) {
+    structureStyleKey = styleKey;
+    structures.setStyle({ hillColor: WORLD_HILL_COLOR[WORLDS[world.worldIndex].id], night: world.isNight });
+  }
+
   const speedRatio = clamp(game.player.speed / TOP_SPEED, 0, 1);
   const inRun = game.state === 'playing' || game.state === 'countdown';
-  effects.setBloom(world.bloom);
-  effects.setSpeedLines(game.nitroActive ? 1 : Math.max(0, speedRatio - 0.62) * 1.6);
-  effects.update(running ? dt : 0, { worldSpeed: speed, speedRatio, nitro: game.nitroActive });
+  const settings = profile.settings;
+  effects.setBloom(settings.bloom ? world.bloom : { ...world.bloom, strength: 0 });
+  const speedFx = settings.speedFx;
+  effects.setSpeedLines(speedFx ? (game.nitroActive ? 1 : Math.max(0, speedRatio - 0.62) * 1.6) : 0);
+  effects.update(running ? dt : 0, { worldSpeed: speed, speedRatio, nitro: game.nitroActive && speedFx });
 
   updateCamera(dt);
 
@@ -231,6 +255,7 @@ function frame(now) {
     maxSpeed: TOP_SPEED,
     throttle: game.state === 'countdown' ? 0.35 : game.player.gas ? 1 : game.player.brake ? 0 : 0.5,
     nitro: game.nitroActive,
+    tunnel: structures.inside,
   });
 
   if (inRun || game.state === 'crashed') {
@@ -240,6 +265,7 @@ function frame(now) {
 
   effects.render(dt);
   governPerformance(dt, inRun);
+  updateFpsCounter(now);
 }
 
 /** Senkt die Auflösung, wenn das Gerät dauerhaft nicht mitkommt. */
@@ -291,7 +317,7 @@ function updateCamera(dt) {
     const speedRatio = clamp((game.player.speed - CONFIG.startSpeed) / (TOP_SPEED - CONFIG.startSpeed), 0, 1);
     rig.goal.set(px * 0.6, CONFIG.cameraHeight - speedRatio * 0.2, CONFIG.cameraDistance + speedRatio * 1.4);
     rig.lookGoal.set(px * 0.85, 0.9, -CONFIG.lookAhead);
-    targetFov += speedRatio * CONFIG.fovBoost + (game.nitroActive ? CONFIG.fovNitro : 0);
+    if (profile.settings.speedFx) targetFov += speedRatio * CONFIG.fovBoost + (game.nitroActive ? CONFIG.fovNitro : 0);
     rig.base.lerp(rig.goal, smoothing(5, dt));
     rig.look.lerp(rig.lookGoal, smoothing(8, dt));
   } else {
@@ -307,7 +333,7 @@ function updateCamera(dt) {
   }
 
   camera.position.copy(rig.base);
-  const shake = game.shake * 0.45 + (game.nitroActive ? 0.05 : 0);
+  const shake = (game.shake * 0.45 + (game.nitroActive ? 0.05 : 0)) * SHAKE_FACTOR[profile.settings.shake];
   if (shake > 0 && !app.paused) {
     camera.position.x += (Math.random() - 0.5) * shake;
     camera.position.y += (Math.random() - 0.5) * shake;
@@ -474,16 +500,78 @@ function openSettings() {
   setScreen('settings');
 }
 
+/** Tageszeit einer Welt in dieser Runde: aus dem Seed, also in Party-Rennen und Tagesrennen für alle gleich. */
+function timeFor(seed, index) {
+  const list = WORLD_TIMES[WORLDS[index].id] || ['default'];
+  return list[hashSeed(`${seed}:time:${index}`) % list.length];
+}
+
+function worldSubtitle(index, time) {
+  const label = TIME_LABELS[time];
+  return label ? `${WORLDS[index].tagline} · ${label}` : WORLDS[index].tagline;
+}
+
+/** Kamerawackeln: Faktor je Einstellung. */
+const SHAKE_FACTOR = { off: 0, low: 0.4, normal: 1 };
+
 function changeSettings(partial) {
-  const qualityChanged = partial.quality && partial.quality !== profile.settings.quality;
-  profile.settings = { ...profile.settings, ...partial };
+  const before = profile.settings;
+  const qualityChanged = partial.quality && partial.quality !== before.quality;
+  profile.settings = sanitizeSettings({ ...before, ...partial });
   saveProfile(profile);
   audio.setSettings(profile.settings);
   ui.renderSettings(profile.settings);
+  applyVisualSettings();
   if (qualityChanged) {
     ui.toast('Grafik wird umgestellt', 'Das Spiel lädt kurz neu …', 'info');
     setTimeout(() => location.reload(), 700);
   }
+}
+
+/** Alle Einstellungen auf die Standardwerte (Münzen, Autos und Name bleiben). */
+function resetSettings() {
+  const qualityChanged = profile.settings.quality !== DEFAULT_SETTINGS.quality;
+  profile.settings = { ...DEFAULT_SETTINGS };
+  saveProfile(profile);
+  audio.setSettings(profile.settings);
+  ui.renderSettings(profile.settings);
+  applyVisualSettings();
+  ui.toast('Einstellungen zurückgesetzt', 'Alles steht wieder auf Standard.', 'info');
+  if (qualityChanged) setTimeout(() => location.reload(), 700);
+}
+
+/** Einstellungen, die nicht Ton sind: Kurven, Tempo-Einheit, Bildraten-Zähler. */
+function applyVisualSettings() {
+  const s = profile.settings;
+  setBendEnabled(s.bend);
+  ui.setSpeedUnit(s.unit);
+  if (s.fps && !fpsCounter.el) {
+    fpsCounter.el = document.createElement('div');
+    fpsCounter.el.id = 'fps-counter';
+    fpsCounter.el.setAttribute('aria-hidden', 'true');
+    document.body.append(fpsCounter.el);
+  }
+  if (fpsCounter.el) fpsCounter.el.hidden = !s.fps;
+}
+
+// Bildraten-Zähler (nur sichtbar, wenn in den Einstellungen eingeschaltet)
+const fpsCounter = { el: null, frames: 0, last: 0 };
+function updateFpsCounter(now) {
+  if (!fpsCounter.el || !profile.settings.fps) return;
+  fpsCounter.frames += 1;
+  if (now - fpsCounter.last < 500) return;
+  const fps = Math.round((fpsCounter.frames * 1000) / Math.max(1, now - fpsCounter.last));
+  fpsCounter.el.textContent = `${fps} FPS`;
+  fpsCounter.frames = 0;
+  fpsCounter.last = now;
+}
+
+/** Handy vibrieren lassen (nur wenn eingeschaltet und vom Gerät unterstützt). */
+function vibrate(pattern) {
+  if (!profile.settings.vibrate || !navigator.vibrate) return;
+  try {
+    navigator.vibrate(pattern);
+  } catch (err) { /* nicht schlimm */ }
 }
 
 // ---------------------------------------------------------------------------
@@ -947,7 +1035,15 @@ async function pushCloud() {
 async function pullCloud() {
   if (!profile.online || online.status !== 'online') return;
   const res = await online.loadProfile(profile.online);
-  if (res.error) return;
+  if (res.error) {
+    // Der Server kennt dieses Online-Profil nicht (mehr): neues anlegen, der lokale Spielstand bleibt erhalten
+    if (res.code === 'auth') {
+      profile.online = null;
+      saveProfile(profile);
+      if (await ensureRegistered()) pushCloud();
+    }
+    return;
+  }
   app.cloud.savedAt = res.updatedAt;
   const cloudProgress = progressOf(res.data);
   const localProgress = progressOf(profile);
@@ -1045,10 +1141,12 @@ function startRun({ seed, raceId = null, countdown, challenge = null, remember =
   if (game.carId !== profile.selectedCar || game.carColor !== colorOf(profile, profile.selectedCar)) {
     game.setPlayerCar(profile.selectedCar, colorOf(profile, profile.selectedCar));
   }
-  world.setWorld(0);
+  const runSeed = seed ?? `${Date.now()}-${Math.random()}`;
+  const firstTime = timeFor(runSeed, 0);
+  world.setWorld(0, false, firstTime);
+  structures.reset(runSeed);
   audio.setMusic(WORLDS[0].id);
   audio.setMusicIntensity(0.5);
-  const runSeed = seed ?? `${Date.now()}-${Math.random()}`;
   app.runSeed = runSeed;
   app.activeChallenge = challenge;
   app.lastStart = remember ? { seed: runSeed, raceId, challenge } : null;
@@ -1082,15 +1180,17 @@ const gameEvents = {
     }
   },
   onWorld(index) {
-    world.setWorld(index);
+    const time = timeFor(app.runSeed, index);
+    world.setWorld(index, false, time);
     audio.setMusic(WORLDS[index].id);
-    ui.toast(WORLDS[index].name, WORLDS[index].tagline, 'world');
+    ui.toast(WORLDS[index].name, worldSubtitle(index, time), 'world');
     audio.play('world');
   },
   onNearMiss({ combo, coins }) {
     ui.popup(combo > 1 ? `KNAPP! ×${combo}  +${coins}` : `KNAPP!  +${coins}`, combo > 1 ? 'combo' : 'near');
   },
   onSmash({ coins }) {
+    vibrate(30);
     ui.popup(`BOOM!  +${coins}`, 'smash');
   },
   onPowerup(type) {
@@ -1102,7 +1202,7 @@ const gameEvents = {
     ui.popup('Schild zerstört!', 'power');
   },
   onNitro(active) {
-    if (active) ui.flash('#00e5ff');
+    if (active) { ui.flash('#00e5ff'); vibrate(40); }
     audio.setMusicIntensity(active ? 1 : 0.5);
   },
   onAbility(ability) {
@@ -1126,6 +1226,7 @@ const gameEvents = {
     ui.popup(`KONVOI ÜBERHOLT  +${coins}`, 'combo');
   },
   onCrash() {
+    vibrate([120, 40, 200]);
     ui.flash('#ff3b4e');
     ui.setTouchControls(false);
     app.party?.setStatus('crashed');
@@ -1358,15 +1459,39 @@ function handleTouch(action) {
   }
 }
 
-// Fokus weg (anderes Fenster) oder Tab im Hintergrund → Pause
+// ---------------------------------------------------------------------------
+// Fenster im Hintergrund: Ton stoppen, Spiel pausieren
+// ---------------------------------------------------------------------------
+
+/** Ist das Spiel gerade nicht im Blick? (anderer Tab, anderes Programm, minimiert, ausgeblendetes Fenster) */
+function isBackground() {
+  return document.hidden || !document.hasFocus();
+}
+
+function syncBackground() {
+  audio.setBackground(isBackground());
+}
+
+// Fokus weg (anderes Fenster): Tasten loslassen, ggf. pausieren, Ton anhalten
 window.addEventListener('blur', () => {
   game?.setGas(false);
   game?.setBrake(false);
-  if (game) setPaused(true);
+  if (game && profile.settings.autoPause) setPaused(true);
+  syncBackground();
 });
+window.addEventListener('focus', syncBackground);
+window.addEventListener('pageshow', syncBackground);
+
+// Tab im Hintergrund oder minimiert → immer pausieren (der Browser bremst die Animation dort ohnehin)
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && game) setPaused(true);
+  syncBackground();
 });
+
+// Sicherheitsnetz: In manchen Umgebungen (z. B. eingebettete Browser-Fenster) fehlen die Ereignisse.
+// Deshalb einmal pro Sekunde nachschauen, damit die Musik nie im Hintergrund weiterläuft.
+setInterval(syncBackground, 1000);
+
 
 // Audio darf erst nach einer Nutzeraktion starten
 window.addEventListener('pointerdown', () => unlockAudio(), { passive: true });

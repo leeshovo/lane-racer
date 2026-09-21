@@ -3707,3 +3707,45 @@ button.chip:hover .chip__edit { opacity: 1; color: var(--gold); }
   #ui.is-touch .ability { width: auto; max-width: 100%; }
   #ui.is-touch .hud-speed { bottom: calc(var(--sab) + 192px); }
 }
+
+/* --- Einstellungen: Gruppen-Überschriften, ausgegraute Regler, Bildraten-Zähler --- */
+.settings-group__title {
+  margin: 0 0 4px;
+  font-family: var(--font-cond);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--signal);
+}
+.setting.is-disabled { opacity: 0.4; }
+.setting.is-disabled .range { cursor: not-allowed; }
+.setting--reset { align-items: center; }
+
+/* Tastenhinweise abschalten (Einstellung "Tastenhinweise") */
+#ui.no-keyhints .hud-keys,
+#ui.no-keyhints .menu__keys,
+#ui.no-keyhints .nitro__key,
+#ui.no-keyhints .ability__key { display: none; }
+
+#fps-counter {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  padding: 2px 9px;
+  border-radius: 4px;
+  font: 700 12px/1.4 var(--font-cond, system-ui, sans-serif);
+  letter-spacing: 0.08em;
+  color: #7CF29C;
+  background: rgba(5, 7, 11, 0.7);
+  pointer-events: none;
+}
+
+/* Ladebalken mit echtem Fortschritt (siehe Skript in index.html) */
+.boot__bar i.is-determinate {
+  width: var(--p, 0%);
+  animation: none;
+  transition: width 0.25s ease;
+}

@@ -16,7 +16,9 @@
  *  - Die UI kennt keine Spiellogik. Sie meldet Klicks über `callbacks` an
  *    main.js und zeigt an, was main.js ihr übergibt.
  */
-import { CARS, PERKS, EMOTES, WORLDS, CONFIG, MISSION_POOL, LEVELS_PER_WORLD, VERSION } from './config.js';
+import {
+  CARS, PERKS, EMOTES, WORLDS, CONFIG, MISSION_POOL, LEVELS_PER_WORLD, VERSION, DEFAULT_SETTINGS, SETTINGS_GROUPS,
+} from './config.js';
 
 // ===========================================================================
 // Konstanten
@@ -39,7 +41,6 @@ const LB_TABS = [
   { kind: 'daily', label: 'Heute' },
   { kind: 'party', label: 'Party' },
 ];
-const QUALITY_OPTIONS = [['auto', 'Auto'], ['high', 'Hoch'], ['medium', 'Mittel'], ['low', 'Niedrig']];
 // [Schlüssel in coins.breakdown, Beschriftung, immer anzeigen?]
 const BREAKDOWN_ROWS = [
   ['collected', 'Eingesammelt', true],
@@ -346,7 +347,7 @@ export class UI {
     this.screen = null;
     this.screens = {};
     this.focusTargets = {};
-    this._settings = { music: true, sfx: true, volume: 0.8, quality: 'auto' };
+    this._settings = { ...DEFAULT_SETTINGS };
     this._name = '';
     this._coinsTarget = null;
     this._coinsShown = 0;
@@ -361,6 +362,7 @@ export class UI {
       combo: -1, comboFrac: NaN, comboShow: null, live: null, race: null,
       abilityOn: null, abilityName: '', abilityFrac: NaN, abilityState: '',
     };
+    this._speedFactor = 1; // 1 = km/h, 0,621 = mph
     this._liveRows = [];
     this._liveOrder = [];
     this.goData = null;
@@ -641,18 +643,31 @@ export class UI {
 
   /** Einstellungen setzen, ohne Change-Events auszulösen. */
   renderSettings(settings = {}) {
-    const s = { ...this._settings, ...(settings || {}) };
+    const s = { ...DEFAULT_SETTINGS, ...this._settings, ...(settings || {}) };
     this._settings = s;
     const st = this.st;
-    st.music.checked = !!s.music;
-    st.sfx.checked = !!s.sfx;
-    const vol = String(Math.round(clamp01(num(s.volume)) * 100));
-    if (st.volume.value !== vol) st.volume.value = vol;
-    st.volumeOut.textContent = `${vol} %`;
-    st.volume.style.setProperty('--p', `${vol}%`);
-    st.volume.disabled = !s.music && !s.sfx;
-    for (const opt of st.quality) opt.btn.setAttribute('aria-pressed', opt.value === s.quality ? 'true' : 'false');
+
+    for (const key of Object.keys(st.rows)) {
+      const r = st.rows[key];
+      const { item } = r;
+      const locked = Boolean(item.requires) && !s[item.requires]; // z. B. Musik-Regler bei ausgeschalteter Musik
+      r.row.classList.toggle('is-disabled', locked);
+      if (item.type === 'switch') {
+        r.input.checked = !!s[key];
+        r.input.disabled = locked;
+      } else if (item.type === 'range') {
+        const value = String(Math.round(clamp01(num(s[key])) * 100));
+        if (r.input.value !== value) r.input.value = value;
+        r.out.textContent = `${value} %`;
+        r.input.style.setProperty('--p', `${value}%`);
+        r.input.disabled = locked;
+      } else {
+        for (const b of r.buttons) b.btn.setAttribute('aria-pressed', b.value === s[key] ? 'true' : 'false');
+      }
+    }
+
     this.root.dataset.quality = s.quality || 'auto';
+    this.root.classList.toggle('no-keyhints', s.keyHints === false); // Tastenhinweise ausblenden
     // Pause-Schalter spiegeln
     this.pz.music.checked = !!s.music;
     this.pz.sfx.checked = !!s.sfx;
@@ -716,7 +731,7 @@ export class UI {
     const kmh = Math.round(num(s.kmh));
     if (kmh !== L.kmh) {
       L.kmh = kmh;
-      hd.speed.set(kmh);
+      hd.speed.set(Math.round(kmh * this._speedFactor));
       hd.speedFill.style.transform = `scaleX(${clamp01(kmh / HUD_SPEED_MAX).toFixed(3)})`;
     }
 
@@ -824,6 +839,15 @@ export class UI {
       L.race = race;
       hd.race.hidden = !race;
     }
+  }
+
+  /** Tempo-Anzeige in km/h oder mph. */
+  setSpeedUnit(unit) {
+    const mph = unit === 'mph';
+    this._speedFactor = mph ? 0.621371 : 1;
+    const label = this.root.querySelector('.hud-speed__unit');
+    if (label) label.textContent = mph ? 'mph' : 'km/h';
+    this._hudLast.kmh = NaN; // beim nächsten Frame neu schreiben
   }
 
   /** Sicherungscode-Bereich in den Einstellungen füllen. */
@@ -2150,44 +2174,57 @@ export class UI {
   // Aufbau: Einstellungen
   // =========================================================================
   _buildSettings() {
-    const st = {};
+    const st = { rows: {} };
     const change = (partial) => this._call('onSettingsChange', partial);
-    const switchRow = (id, label, desc, key) => {
-      const input = h('input', { id, type: 'checkbox', role: 'switch', class: 'switch' });
-      input.addEventListener('change', () => change({ [key]: input.checked }));
-      const row = h('label', { class: 'setting setting--switch', for: id },
-        h('span', { class: 'setting__text' }, h('span', { class: 'setting__label' }, label), h('span', { class: 'setting__desc' }, desc)),
-        input);
-      return { input, row };
+
+    /** Baut eine Zeile nach der Beschreibung in SETTINGS_GROUPS (config.js). */
+    const buildItem = (item) => {
+      const id = `lr-set-${item.key}`;
+      const text = (labelId) => h('span', { class: 'setting__text' },
+        h('span', { class: 'setting__label', id: labelId }, item.label),
+        item.desc ? h('span', { class: 'setting__desc' }, item.desc) : null);
+
+      if (item.type === 'switch') {
+        const input = h('input', { id, type: 'checkbox', role: 'switch', class: 'switch' });
+        input.addEventListener('change', () => change({ [item.key]: input.checked }));
+        const row = h('label', { class: 'setting setting--switch', for: id }, text(null), input);
+        st.rows[item.key] = { item, row, input };
+        return row;
+      }
+
+      if (item.type === 'range') {
+        const input = h('input', { id, type: 'range', min: '0', max: '100', step: '5', class: 'range' });
+        const out = h('output', { class: 'setting__value', for: id }, '0 %');
+        input.addEventListener('input', () => {
+          const v = Number(input.value);
+          out.textContent = `${v} %`;
+          input.style.setProperty('--p', `${v}%`);
+          change({ [item.key]: v / 100 });
+        });
+        const row = h('div', { class: 'setting setting--range' },
+          h('label', { class: 'setting__label', for: id }, item.label), out, input);
+        st.rows[item.key] = { item, row, input, out };
+        return row;
+      }
+
+      // Auswahl (seg)
+      const buttons = item.options.map(([value, label]) => ({
+        value,
+        btn: h('button', {
+          type: 'button', class: 'seg__btn', 'aria-pressed': 'false',
+          onClick: () => { if (value !== this._settings[item.key]) change({ [item.key]: value }); },
+        }, label),
+      }));
+      const row = h('div', { class: 'setting setting--seg', role: 'group', 'aria-labelledby': `${id}-label` },
+        text(`${id}-label`),
+        h('div', { class: 'seg' }, buttons.map((b) => b.btn)));
+      st.rows[item.key] = { item, row, buttons };
+      return row;
     };
-    const music = switchRow('lr-set-music', 'Musik', 'Synthwave-Soundtrack je Welt', 'music');
-    const sfx = switchRow('lr-set-sfx', 'Soundeffekte', 'Motor, Münzen, Crashs', 'sfx');
-    st.music = music.input;
-    st.sfx = sfx.input;
 
-    st.volume = h('input', { id: 'lr-set-volume', type: 'range', min: '0', max: '100', step: '5', class: 'range' });
-    st.volumeOut = h('output', { class: 'setting__value', for: 'lr-set-volume' }, '80 %');
-    st.volume.addEventListener('input', () => {
-      const v = Number(st.volume.value);
-      st.volumeOut.textContent = `${v} %`;
-      st.volume.style.setProperty('--p', `${v}%`);
-      change({ volume: v / 100 });
-    });
-    const volumeRow = h('div', { class: 'setting setting--range' },
-      h('label', { class: 'setting__label', for: 'lr-set-volume' }, 'Lautstärke'), st.volumeOut, st.volume);
-
-    st.quality = QUALITY_OPTIONS.map(([value, label]) => ({
-      value,
-      btn: h('button', {
-        type: 'button', class: 'seg__btn', 'aria-pressed': 'false',
-        onClick: () => { if (value !== this._settings.quality) change({ quality: value }); },
-      }, label),
-    }));
-    const qualityRow = h('div', { class: 'setting setting--seg', role: 'group', 'aria-labelledby': 'lr-set-quality' },
-      h('span', { class: 'setting__text' },
-        h('span', { class: 'setting__label', id: 'lr-set-quality' }, 'Grafikqualität'),
-        h('span', { class: 'setting__desc' }, 'Auto passt sich deinem Gerät an. Eine Änderung lädt das Spiel kurz neu.')),
-      h('div', { class: 'seg' }, st.quality.map((q) => q.btn)));
+    const groups = SETTINGS_GROUPS.map((group) => h('div', { class: 'settings-group', 'data-group': group.id },
+      h('h3', { class: 'settings-group__title' }, group.title),
+      group.items.map(buildItem)));
 
     st.nameValue = h('strong', { class: 'setting__name' }, 'Gast');
     const nameRow = h('div', { class: 'setting setting--name' },
@@ -2206,7 +2243,7 @@ export class UI {
         keyRow(['F'], 'Auto-Fähigkeit einsetzen (oder E)'),
         keyRow(['P'], 'Pause'),
         keyRow(['M'], 'Ton an / aus')),
-      h('p', { class: 'setting__desc' }, 'Am Handy: links/rechts tippen oder die Pfeile nutzen, dazu Gas, Bremse und Nitro.'));
+      h('p', { class: 'setting__desc' }, 'Am Handy: links/rechts tippen oder die Pfeile nutzen, dazu Gas, Bremse, Nitro und Fähigkeit.'));
 
     // --- Spielstand sichern (Cloud) ---
     st.cloudStatus = h('span', { class: 'setting__desc setting__status', role: 'status' }, 'Noch nicht gesichert');
@@ -2237,12 +2274,21 @@ export class UI {
     st.codeShow.disabled = true;
     st.codeCopy.disabled = true;
 
+    // --- Alles auf Standard ---
+    const resetRow = h('div', { class: 'setting setting--reset' },
+      h('span', { class: 'setting__text' },
+        h('span', { class: 'setting__label' }, 'Einstellungen zurücksetzen'),
+        h('span', { class: 'setting__desc' }, 'Ton, Grafik und Anzeige gehen auf die Standardwerte. Münzen und Autos bleiben.')),
+      h('button', { type: 'button', class: 'btn btn--ghost btn--sm', onClick: () => this._call('onSettingsReset') },
+        icon('restart'), h('span', { class: 'btn__label' }, 'Zurücksetzen')));
+
     this._sheet('settings', { kicker: 'Optionen', title: 'Einstellungen' },
       h('div', { class: 'sheet__body' },
-        h('div', { class: 'settings-group' }, music.row, sfx.row, volumeRow),
-        h('div', { class: 'settings-group' }, qualityRow, nameRow),
+        groups,
+        h('div', { class: 'settings-group' }, nameRow),
         h('div', { class: 'settings-group' }, cloudRow),
         h('div', { class: 'settings-group' }, controls),
+        h('div', { class: 'settings-group' }, resetRow),
         h('p', { class: 'version' }, `Lane Racer ${VERSION} · three.js · Supabase`)));
     this.st = st;
   }

@@ -863,6 +863,87 @@ function preparePreset(raw) {
 const PRESETS = RAW_PRESETS.map(preparePreset);
 const PRESET_BY_ID = new Map(PRESETS.map((p) => [p.id, p]));
 
+/*
+ * Tageszeiten: Aus jeder Welt lassen sich Varianten ableiten (Morgen, Abend, Nacht, Mittag).
+ * tint  = Farbe → [Zielfarbe, Anteil 0–1], mit dem die Grundfarbe gemischt wird
+ * mul   = Zahlen, die mit einem Faktor multipliziert werden
+ * set   = Zahlen, die fest gesetzt werden
+ * Welche Welt welche Zeiten kennt, steht in WORLD_TIMES (config.js).
+ */
+const TIME_OF_DAY = {
+  dawn: {
+    sunDir: [0.62, 0.2, -0.75],
+    tint: {
+      fog: [0xf2c8b8, 0.55], zenith: [0x5c6fb4, 0.5], horizon: [0xffc59f, 0.75], sunGlow: [0xffb070, 1],
+      ambient: [0xe9c1b8, 0.5], hemiSky: [0xe8b9b0, 0.5], dirColor: [0xffc190, 0.75],
+    },
+    mul: { dirI: 0.85 },
+    set: { sunOp: 1 },
+  },
+  dusk: {
+    sunDir: [-0.66, 0.16, -0.73],
+    tint: {
+      fog: [0xf0b184, 0.6], zenith: [0x39447e, 0.55], horizon: [0xffa257, 0.8], sunGlow: [0xff8a3a, 1],
+      ambient: [0xe7a888, 0.5], hemiSky: [0xe8a878, 0.5], dirColor: [0xffa050, 0.85],
+    },
+    mul: { dirI: 0.95, exposure: 0.98 },
+    set: { sunOp: 1 },
+  },
+  day: {
+    sunDir: [0.2, 0.92, -0.35],
+    tint: {
+      fog: [0xc8dff5, 0.6], zenith: [0x2b6cc9, 0.6], horizon: [0xcfe4f6, 0.6], sunGlow: [0xfff2c8, 1], dirColor: [0xfff6e0, 0.85],
+    },
+    mul: { dirI: 1.05 },
+    set: { sunOp: 0.95 },
+  },
+  night: {
+    night: true,
+    sunDir: [-0.35, 0.5, -0.8],
+    tint: {
+      fog: [0x0e1424, 0.92], zenith: [0x040814, 0.95], horizon: [0x1a2448, 0.9], sunGlow: [0x6070ff, 1],
+      ambient: [0x2b3860, 0.85], hemiSky: [0x28345c, 0.85], hemiGround: [0x0e0d18, 0.7], dirColor: [0x9fb4ff, 0.9],
+      road: [0xa9b4cc, 0.7], ground: [0x8f9cb8, 0.65], rail: [0x6e7c96, 0.5], lamp: [0xffd9a8, 1],
+    },
+    mul: {},
+    set: {
+      ambI: 0.3, hemiI: 0.35, dirI: 0.55, env: 0.35, exposure: 1.15, bloomS: 0.9, bloomT: 0.72,
+      lampI: 2.6, stars: 0.9, sunOp: 0, moonOp: 0.9, overlay: 0,
+    },
+  },
+};
+
+const TIME_VARIANTS = new Map();
+
+/** Leitet aus einem Welt-Preset eine Tageszeit-Variante ab (einmal berechnet, danach aus dem Zwischenspeicher). */
+function makeTimeVariant(base, time) {
+  const def = TIME_OF_DAY[time];
+  if (!def) return base;
+  const key = base.id + ':' + time;
+  if (TIME_VARIANTS.has(key)) return TIME_VARIANTS.get(key);
+
+  const colors = {};
+  for (const k of COLOR_KEYS) {
+    colors[k] = base.colors[k].clone();
+    if (def.tint[k]) colors[k].lerp(new THREE.Color(def.tint[k][0]), def.tint[k][1]);
+  }
+  const nums = { ...base.nums };
+  for (const k of Object.keys(def.mul || {})) nums[k] *= def.mul[k];
+  for (const k of Object.keys(def.set || {})) nums[k] = def.set[k];
+  const variant = {
+    id: base.id,
+    night: def.night ?? base.night,
+    weather: base.weather,
+    sunDir: new THREE.Vector3(...def.sunDir).normalize(),
+    colors,
+    nums,
+    base, // Texturen und Szenerie richten sich nach der Grundwelt
+    time,
+  };
+  TIME_VARIANTS.set(key, variant);
+  return variant;
+}
+
 /** Leere Live-Struktur (wird pro Frame befüllt). */
 function makeLive() {
   const colors = {};
@@ -1900,9 +1981,15 @@ export class World {
     this._seedWeather(this._weatherKind);
   }
 
-  setWorld(index, instant = false) {
+  /**
+   * @param index Index in WORLDS
+   * @param instant true = ohne Überblendung
+   * @param time 'default' (Grundstimmung der Welt) | 'dawn' | 'dusk' | 'day' | 'night'
+   */
+  setWorld(index, instant = false, time = 'default') {
     const i = Math.max(0, Math.min(WORLDS.length - 1, index | 0));
-    const preset = PRESET_BY_ID.get(WORLDS[i].id) || PRESETS[i] || PRESETS[0];
+    const base = PRESET_BY_ID.get(WORLDS[i].id) || PRESETS[i] || PRESETS[0];
+    const preset = time && time !== 'default' ? makeTimeVariant(base, time) : base;
     if (this._target === preset && !instant && this._t >= 1) return;
 
     // Laufende Texturüberblendung zuerst sauber abschließen.
@@ -1916,7 +2003,7 @@ export class World {
     this._texSwapped = false;
 
     // Zieltexturen als zweiten Sampler einhängen
-    const ti = PRESETS.indexOf(preset);
+    const ti = PRESETS.indexOf(preset.base || preset);
     this._texTarget = ti;
     this.roadBlend.uMapB.value = this.roadTex[ti];
     this.groundBlend.uMapB.value = this.groundTex[ti];

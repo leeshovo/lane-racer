@@ -6,7 +6,7 @@
  * Zusätzlich gibt es einen "Snapshot" des Spielstands, der in der Cloud
  * gesichert und auf einem anderen Gerät wiederhergestellt werden kann.
  */
-import { CARS, MISSION_POOL, CONFIG, carById } from './config.js';
+import { CARS, MISSION_POOL, CONFIG, carById, DEFAULT_SETTINGS, sanitizeSettings } from './config.js';
 
 const KEY = 'laneRacer2.profile';
 const ACTIVE_MISSIONS = 3;
@@ -24,7 +24,7 @@ export function defaultProfile() {
     missions: [],
     missionTier: {},
     daily: { key: '', best: 0 }, // bester Versuch im Tagesrennen des Tages "key" (YYYYMMDD)
-    settings: { music: true, sfx: true, volume: 0.8, quality: 'auto' },
+    settings: { ...DEFAULT_SETTINGS },
     online: null, // { id, secret } nach der Registrierung
   };
 }
@@ -37,7 +37,7 @@ function normalize(stored) {
   const p = { ...base, ...stored };
   p.stats = { ...base.stats, ...(stored.stats || {}) };
   for (const k of Object.keys(base.stats)) p.stats[k] = Math.max(0, Math.floor(Number(p.stats[k]) || 0));
-  p.settings = { ...base.settings, ...(stored.settings || {}) };
+  p.settings = sanitizeSettings(stored.settings);
   p.colors = { ...base.colors, ...(stored.colors || {}) };
   // Nur erlaubte Lackfarben der jeweiligen Autos übernehmen
   for (const car of CARS) if (!car.colors.includes(p.colors[car.id])) p.colors[car.id] = car.colors[0];

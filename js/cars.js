@@ -177,7 +177,7 @@ const MAT = {
     color: 0x5a0a10, emissive: 0xff2a1c, emissiveIntensity: 6.0, metalness: 0.1, roughness: 0.3,
   })),
   beam: () => cachedMat('beam', () => new THREE.MeshBasicMaterial({
-    color: 0xbcdcff, transparent: true, opacity: 0.085, blending: THREE.AdditiveBlending,
+    color: 0xbcdcff, transparent: true, opacity: 0.05, blending: THREE.AdditiveBlending,
     depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
   })),
   barRedOff: () => cachedMat('barRedOff', () => new THREE.MeshStandardMaterial({ color: 0x4d0a10, emissive: 0xff1424, emissiveIntensity: 0.3, roughness: 0.3 })),

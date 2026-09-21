@@ -31,6 +31,10 @@ Bremse, Nitro und Fähigkeit.
   Sonnental → Canyon → Neon City → Frostpass → Vulkan. Nach ca. 3 Minuten ist die maximale Schwierigkeit erreicht.
 - **Kurven und Hügel:** Die Straße schwingt seitlich und über Kuppen. Gefahren wird trotzdem in drei geraden
   Spuren, die Krümmung ist ein optischer Effekt (siehe `js/bend.js`).
+- **Tunnel und Brücken:** Alle 1,5–3 km fährst du durch einen beleuchteten Tunnel (Hügel obendrauf, Musik und Motor klingen dumpfer)
+  oder über eine Hängebrücke. Die Lage ist aus dem Seed berechnet – im Party- und Tagesrennen sehen alle dieselben Bauwerke.
+- **Tageszeiten:** Jede Welt gibt es als Tag, Morgen, Abend oder Nacht (mit Scheinwerferkegeln). Welche Stimmung
+  kommt, wird pro Runde aus dem Seed gewürfelt.
 - **Münzen** liegen auf der Strecke und bezahlen die Garage. Dazu gibt es Münzen für Beinahe-Unfälle
   (Kombo bis ×5), gerammte Autos und die gefahrene Strecke.
 - **Ereignisse:** *Goldrausch* (lange Münzlinien), *Stoßverkehr* (dichter Verkehr, dafür doppelte Beinahe-Münzen)
@@ -41,6 +45,19 @@ Bremse, Nitro und Fähigkeit.
 - **Missionen:** drei laufende Aufgaben, danach kommt jeweils eine schwerere Stufe.
 - **Fair by design:** In jeder Gegner-Reihe bleibt mindestens eine Spur frei, und von jeder freien Spur
   reicht ein Spurwechsel für die nächste Reihe. Um den Konvoi herum gibt es extra Platz.
+
+## Einstellungen
+
+Im Hauptmenü unter **Einstellungen** (im Spiel auch über die Pause):
+
+- **Ton:** Musik und Effekte einzeln an/aus, Gesamtlautstärke, Musik, Effekte und Motorgeräusch als Regler und
+  **Im Hintergrund stumm** (Standard: an). Sobald du den Tab oder das Fenster wechselst, wird der komplette Ton
+  angehalten – auch die Menümusik. Kommst du zurück, geht er nahtlos weiter.
+- **Grafik und Effekte:** Qualität (Auto/Hoch/Mittel/Niedrig), Kurven und Hügel, Leuchteffekte, Tempo-Effekte, Kamerawackeln.
+- **Anzeige und Steuerung:** Einheit km/h oder mph, FPS-Anzeige, Tastenhinweise, Vibration (Handy), automatische Pause beim Tab-Wechsel.
+- **Spielstand sichern** und **Alles zurücksetzen**.
+
+Einstellungen gehören zum Gerät und werden nicht mit der Cloud synchronisiert.
 
 ## Online mit Freunden
 
@@ -118,6 +135,7 @@ js/
   game.js       Spielmechanik: Spieler, Verkehr, Ereignisse, Konvoi, Fähigkeiten, Kollisionen
   config.js     Alle Stellschrauben: Tempo, Schwierigkeit, Autos, Welten, Missionen
   bend.js       Kurven und Hügel (gebogene Welt im Vertex-Shader)
+  structures.js Tunnel und Hängebrücken (Streckenplan aus dem Seed)
   cars.js       Fahrzeugmodelle (prozedural aus Boxen und Zylindern)
   world.js      Umgebung: Himmel, Licht, Straße, Deko, Wetter, Weltenwechsel
   effects.js    Bloom, Partikel, Schockwellen, Schild, Tempo-Striche

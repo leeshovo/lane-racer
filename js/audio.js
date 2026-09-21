@@ -42,7 +42,9 @@ export class AudioManager {
     this.ctx = null;
     this.ready = false;
     this.paused = false;
-    this.settings = { music: true, sfx: true, volume: 0.8 };
+    // volume = Gesamtlautstärke; musicVolume / sfxVolume / engineVolume regeln die drei Gruppen einzeln
+    this.settings = { music: true, sfx: true, volume: 0.8, musicVolume: 0.7, sfxVolume: 0.9, engineVolume: 0.6, muteInBackground: true };
+    this.background = false; // true = Fenster im Hintergrund oder ohne Fokus
 
     this.trackName = null;
     this.pendingTrack = null;
@@ -62,7 +64,7 @@ export class AudioManager {
   /** Nach der ersten Nutzeraktion aufrufen (Klick, Tastendruck). Mehrfach unschädlich. */
   unlock() {
     if (this.ready) {
-      if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+      if (this.ctx.state === 'suspended' && !this.#silenced) this.ctx.resume().catch(() => {});
       return;
     }
     const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -91,7 +93,7 @@ export class AudioManager {
     this.musicGain.connect(this.master);
 
     this.sfxGain = this.ctx.createGain();
-    this.sfxGain.gain.value = this.settings.sfx ? 0.9 : 0;
+    this.sfxGain.gain.value = this.settings.sfx ? this.settings.sfxVolume : 0;
     this.sfxGain.connect(this.master);
 
     this.engineGain = this.ctx.createGain();
@@ -102,7 +104,7 @@ export class AudioManager {
     this.#buildEngine();
     this.ready = true;
 
-    this.ctx.resume().catch(() => {});
+    if (!this.#silenced) this.ctx.resume().catch(() => {});
     if (this.pendingTrack !== null) {
       const track = this.pendingTrack;
       this.pendingTrack = null;
@@ -115,10 +117,35 @@ export class AudioManager {
     if (!this.ready) return;
     const now = this.ctx.currentTime;
     this.master.gain.setTargetAtTime(this.settings.volume, now, 0.05);
-    this.sfxGain.gain.setTargetAtTime(this.settings.sfx ? 0.9 : 0, now, 0.05);
+    this.sfxGain.gain.setTargetAtTime(this.settings.sfx ? this.settings.sfxVolume : 0, now, 0.05);
     this.#updateMusicGain();
     if (!this.settings.music) this.#stopScheduler();
     else if (this.trackName) this.#startScheduler();
+    this.#applyBackground();
+  }
+
+  /**
+   * Fenster im Hintergrund (anderer Tab, anderes Programm, minimiert)?
+   * Ist "Im Hintergrund stumm" an, wird der komplette Ton angehalten – auch die Menümusik.
+   * Zurück im Vordergrund läuft er nahtlos weiter.
+   */
+  setBackground(background) {
+    this.background = Boolean(background);
+    this.#applyBackground();
+  }
+
+  /** true = es soll gerade nichts zu hören sein, weil das Fenster im Hintergrund ist. */
+  get #silenced() {
+    return this.background && this.settings.muteInBackground;
+  }
+
+  #applyBackground() {
+    if (!this.ready) return;
+    if (this.#silenced) {
+      if (this.ctx.state === 'running') this.ctx.suspend().catch(() => {});
+    } else if (this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
+    }
   }
 
   setPaused(paused) {
@@ -207,18 +234,19 @@ export class AudioManager {
     this.engine.sub.frequency.setTargetAtTime(base * 0.5, now, 0.08);
     this.engine.filter.frequency.setTargetAtTime(420 + ratio * 2600 + throttle * 900 + (nitro ? 1800 : 0), now, 0.08);
 
-    const volume = (0.05 + ratio * 0.1 + throttle * 0.05) * (this.settings.sfx ? 1 : 0);
+    const engineLevel = this.settings.sfx ? (this.settings.engineVolume / 0.6) * (this.engineState.tunnel ? 1.4 : 1) : 0; // im Tunnel hallt der Motor lauter // 0,6 = Standard = unverändert
+    const volume = (0.05 + ratio * 0.1 + throttle * 0.05) * engineLevel;
     this.engineGain.gain.setTargetAtTime(volume, now, 0.1);
 
     this.engine.noiseFilter.frequency.setTargetAtTime(700 + ratio * 2600, now, 0.1);
-    this.engine.noiseGain.gain.setTargetAtTime((nitro ? 0.09 : 0.02 + ratio * 0.025) * (this.settings.sfx ? 1 : 0), now, 0.12);
+    this.engine.noiseGain.gain.setTargetAtTime((nitro ? 0.09 : 0.02 + ratio * 0.025) * engineLevel, now, 0.12);
   }
 
   // =========================================================================
   // Effekte
   // =========================================================================
   play(name, opts = {}) {
-    if (!this.ready || !this.settings.sfx || this.paused) return;
+    if (!this.ready || !this.settings.sfx || this.paused || this.#silenced) return;
     const ctx = this.ctx;
     const t = ctx.currentTime;
     const pitch = opts.pitch ?? 1;
@@ -414,7 +442,7 @@ export class AudioManager {
   #updateMusicGain() {
     if (!this.ready) return;
     const wanted = this.trackName && this.settings.music && !this.paused
-      ? 0.16 + this.intensity * 0.12
+      ? (0.16 + this.intensity * 0.12) * (this.settings.musicVolume / 0.7) // 0,7 = Standard = unverändert
       : 0;
     this.musicGain.gain.setTargetAtTime(wanted, this.ctx.currentTime, 0.6);
   }

@@ -42,8 +42,30 @@
   <link rel="modulepreload" href="js/game.js">
   <link rel="modulepreload" href="js/cars.js">
   <link rel="modulepreload" href="js/rng.js">
+  <link rel="modulepreload" href="js/structures.js">
   <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js">
   <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.core.js">
+  <!--
+    Ladebalken mit echtem Fortschritt: Jede vorgeladene Datei zählt einen Schritt. Fertige Downloads
+    erscheinen im Resource-Timing des Browsers – daran erkennt das Skript, wie weit das Laden ist.
+    Sobald main.js läuft (window.__bootDone), übernimmt das Spiel die Anzeige.
+  -->
+  <script>
+    (function () {
+      var links = Array.prototype.slice.call(document.querySelectorAll('link[rel="modulepreload"]'));
+      var timer = setInterval(function () {
+        if (window.__bootDone) { clearInterval(timer); return; }
+        var seen = {};
+        performance.getEntriesByType('resource').forEach(function (e) { seen[e.name] = true; });
+        var done = links.filter(function (l) { return seen[l.href]; }).length;
+        var pct = Math.min(96, Math.round((done / Math.max(1, links.length)) * 96));
+        var bar = document.querySelector('.boot__bar i');
+        var label = document.querySelector('.boot__text');
+        if (bar) { bar.classList.add('is-determinate'); bar.style.setProperty('--p', pct + '%'); }
+        if (label) label.textContent = 'Lane Racer wird geladen … ' + done + ' von ' + links.length + ' Dateien';
+      }, 100);
+    })();
+  </script>
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 
