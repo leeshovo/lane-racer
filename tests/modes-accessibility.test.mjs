@@ -139,3 +139,17 @@ describe('Barrierefreiheit', () => {
     assert.equal(game.powerupColor('shield'), POWERUPS.shield.color);
   });
 });
+
+describe('Verkehrsvielfalt', () => {
+  it('Motorräder, Baustellenfahrzeuge und Krankenwagen kommen im Verkehr vor', async () => {
+    const { TRAFFIC } = await import('../js/config.js');
+    const types = new Set();
+    for (let i = 0; i < 40; i++) {
+      const game = makeGame();
+      game.start({ seed: `vielfalt-${i}`, countdown: 0.01 });
+      for (const e of game.enemies) types.add(e.type);
+    }
+    for (const t of ['bike', 'roadworks', 'ambulance', 'sedan', 'truck']) assert.ok(types.has(t), `${t} taucht auf`);
+    for (const def of TRAFFIC) assert.ok(def.size.every((n) => n > 0), def.type);
+  });
+});

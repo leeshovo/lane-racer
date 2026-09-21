@@ -253,6 +253,9 @@ export const TRAFFIC = [
   { type: 'van',    weight: 12, size: [2.0, 2.3, 4.9] },
   { type: 'truck',  weight: 14, size: [2.35, 3.2, 7.2] },
   { type: 'police', weight: 4,  size: [1.95, 1.65, 4.6] },
+  { type: 'bike',      weight: 9, size: [0.95, 1.6, 2.2] },  // Motorrad: schmal
+  { type: 'roadworks', weight: 5, size: [2.1, 2.7, 5.4] },   // Baustellenfahrzeug mit Warnbake
+  { type: 'ambulance', weight: 3, size: [2.0, 2.3, 5.0] },   // Krankenwagen mit Blaulicht
   { type: 'boss',   weight: 0,  size: [2.35, 3.2, 15.0] }, // Schwerlast-Konvoi (zwei Lkw), nur als Ereignis
 ];
 export const TRAFFIC_COLORS = ['#2f7de1', '#f2c200', '#2fbf71', '#e9ecef', '#8e5bd6', '#1fb5c9', '#3a4250', '#9aa5b1', '#7a1f2b'];

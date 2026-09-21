@@ -828,6 +828,67 @@ function buildTrafficPolice(b, D) {
   return b.bake([1.95, 1.65, 4.60], { police: true, forcePaint: '#eef1f6', forceAccent: '#14181f' });
 }
 
+/** Motorrad mit Fahrer: schmal, aber gut sichtbar. */
+function buildTrafficBike(b, D) {
+  b.add('paint', RB(0.40, 0.44, 1.05, 0.14, D.round), [0, 0.90, -0.12]);          // Tank
+  b.add('paint', RB(0.34, 0.24, 0.62, 0.10, D.round), [0, 0.66, 0.58], [-0.10, 0, 0]); // Heck
+  b.add('dark', BX(0.34, 0.34, 0.50), [0, 0.50, 0.02]);                            // Motor
+  b.add('dark', RB(0.30, 0.10, 0.72, 0.04, 1), [0, 0.88, 0.42]);                   // Sitz
+  b.add('chrome', BX(0.07, 0.86, 0.08), [0, 0.62, -0.84], [0.22, 0, 0]);           // Gabel
+  b.add('chrome', BX(0.62, 0.05, 0.05), [0, 1.06, -0.86]);                         // Lenker
+  b.add('accent', RB(0.46, 0.66, 0.34, 0.12, D.round), [0, 1.38, 0.24], [0.22, 0, 0]); // Fahrer (Jacke)
+  b.add('glass', RB(0.30, 0.30, 0.32, 0.12, D.round), [0, 1.86, 0.10]);            // Helm
+  b.add('head', RB(0.24, 0.22, 0.10, 0.04, 1), [0, 1.00, -1.00]);
+  b.add('tail', RB(0.22, 0.10, 0.08, 0.03, 1), [0, 0.86, 0.98]);
+  b.wheel(0, 0.34, -0.86, 0.34, 0.16);
+  b.wheel(0, 0.34, 0.86, 0.36, 0.20);
+  return b.bake([0.95, 1.60, 2.20]);
+}
+
+/** Baustellenfahrzeug: orange, Warnbake mit Leuchtpfeil, gelbes Rundumlicht. */
+function buildTrafficRoadworks(b, D) {
+  b.add('paint', RB(2.00, 1.30, 1.90, 0.22, D.round), [0, 1.20, -1.70]);           // Fahrerhaus
+  b.add('paint', RB(2.04, 0.56, 3.40, 0.14, D.round), [0, 0.92, 1.10]);            // Ladefläche
+  b.add('glass', RB(1.72, 0.56, 0.24, 0.10, D.round), [0, 1.66, -2.60], [0.20, 0, 0]);
+  b.pair('glass', BX(0.03, 0.46, 0.80), [1.015, 1.62, -1.90]);
+  b.add('accent', BX(2.06, 0.20, 3.42), [0, 1.24, 1.10]);                          // schwarzer Streifen
+  // Warnbake hinten: schwarze Tafel mit gelbem Leuchtpfeil
+  b.add('accent', RB(1.90, 1.10, 0.10, 0.04, 1), [0, 1.86, 2.66]);
+  b.part('arrow', 'sign', mergeList([
+    xf(BX(1.20, 0.16, 0.06), [0, 1.88, 2.72]),
+    xf(BX(0.16, 0.60, 0.06), [0.52, 1.88, 2.72], [0, 0, 0.7]),
+    xf(BX(0.16, 0.60, 0.06), [0.52, 1.88, 2.72], [0, 0, -0.7]),
+  ]));
+  b.add('dark', BX(1.90, 0.22, 5.20), [0, 0.60, 0.20]);
+  b.add('dark', RB(2.00, 0.26, 0.18, 0.06, 1), [0, 0.50, -2.70]);
+  b.pair('head', RB(0.42, 0.20, 0.12, 0.04, 1), [0.68, 0.80, -2.66]);
+  b.pair('tail', RB(0.22, 0.30, 0.10, 0.04, 1), [0.84, 0.86, 2.80]);
+  b.axle(0.84, 0.46, -1.90, 0.46, 0.30);
+  b.axle(0.84, 0.46, 1.80, 0.46, 0.30);
+  return b.bake([2.10, 2.70, 5.40], { forcePaint: '#ff8a00', forceAccent: '#14181f' });
+}
+
+/** Krankenwagen: weiß mit rotem Streifen und Kreuz, blinkende Lichtleiste (wie beim Streifenwagen). */
+function buildTrafficAmbulance(b, D) {
+  b.add('paint', RB(1.96, 1.20, 5.00, 0.26, D.round), [0, 0.90, 0.10]);
+  b.add('paint', RB(1.92, 0.94, 3.40, 0.22, D.round), [0, 1.86, 0.80]);            // Kasten
+  b.add('glass', RB(1.70, 0.52, 0.26, 0.10, D.round), [0, 1.44, -2.32], [0.30, 0, 0]);
+  b.pair('glass', BX(0.03, 0.40, 0.90), [0.975, 1.40, -1.66]);
+  b.add('accent', BX(1.98, 0.22, 4.10), [0, 1.12, 0.46]);                          // roter Streifen
+  b.pair('accent', BX(0.03, 0.80, 0.24), [0.985, 1.92, 0.90]);                     // Kreuz senkrecht
+  b.pair('accent', BX(0.03, 0.24, 0.80), [0.985, 1.92, 0.90]);                     // Kreuz waagerecht
+  b.add('dark', RB(1.90, 0.26, 0.16, 0.06, 1), [0, 0.46, -2.56]);
+  b.add('dark', RB(1.86, 0.24, 0.16, 0.06, 1), [0, 0.46, 2.66]);
+  b.add('dark', RB(1.20, 0.09, 0.26, 0.03, 1), [0, 2.36, -0.40]);
+  b.part('barRed', 'barRed', xf(RB(0.52, 0.12, 0.22, 0.04, 1), [-0.32, 2.43, -0.40]));
+  b.part('barBlue', 'barBlue', xf(RB(0.52, 0.12, 0.22, 0.04, 1), [0.32, 2.43, -0.40]));
+  b.pair('head', RB(0.42, 0.16, 0.12, 0.04, 1), [0.64, 0.86, -2.56]);
+  b.pair('tail', RB(0.18, 0.50, 0.10, 0.04, 1), [0.82, 1.28, 2.62]);
+  b.axle(0.84, 0.38, -1.62, 0.38, 0.28);
+  b.axle(0.84, 0.38, 1.80, 0.38, 0.28);
+  return b.bake([2.00, 2.30, 5.00], { police: true, forcePaint: '#f4f6fa', forceAccent: '#d61f2c' });
+}
+
 // ===========================================================================
 // 6 – Blueprints
 // ===========================================================================
@@ -850,6 +911,9 @@ const TRAFFIC_BUILDERS = {
   van: buildTrafficVan,
   truck: buildTrafficTruck,
   police: buildTrafficPolice,
+  bike: buildTrafficBike,
+  roadworks: buildTrafficRoadworks,
+  ambulance: buildTrafficAmbulance,
 };
 
 const TRAFFIC_TYPES = new Set(TRAFFIC.map((t) => t.type));
@@ -1090,7 +1154,7 @@ export function createPlayerCar(carId, color, options = {}) {
 
 /**
  * Verkehrsfahrzeug bauen – bewusst günstig (gecachte Geometrien & Materialien).
- * @param {'sedan'|'hatch'|'taxi'|'van'|'truck'|'police'} type
+ * @param {'sedan'|'hatch'|'taxi'|'van'|'truck'|'police'|'bike'|'roadworks'|'ambulance'} type
  * @param {string} color – '#rrggbb'
  */
 export function createTrafficVehicle(type, color, options = {}) {
