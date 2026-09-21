@@ -301,6 +301,58 @@ export const POWERUP_COLORBLIND = { nitro: '#00E5FF', shield: '#FFFFFF', magnet:
 
 export const EMOTES = ['👍', '🔥', '😂', '😱', '🏁', '💀'];
 
+// Schnellnachrichten für die Party: feste Sätze statt freiem Chat (kein Missbrauch, keine Moderation nötig)
+export const QUICK_CHAT = [
+  { id: 'gg',      text: 'Gut gefahren!' },
+  { id: 'again',   text: 'Nochmal?' },
+  { id: 'ready',   text: 'Bin bereit' },
+  { id: 'wait',    text: 'Moment noch' },
+  { id: 'nice',    text: 'Starker Move!' },
+  { id: 'unlucky', text: 'Pech gehabt' },
+];
+
+// ---------------------------------------------------------------------------
+// Tagesserie: Wer an aufeinanderfolgenden Tagen fährt, bekommt beim ersten Rennen des Tages einen Bonus.
+// Tag 1 = 20 Münzen, Tag 2 = 40 … ab Tag 7 = 140 (Höchstwert).
+// ---------------------------------------------------------------------------
+export const STREAK = { perDay: 20, maxDays: 7 };
+export const streakBonus = (days) => Math.min(Math.max(0, Math.floor(days)), STREAK.maxDays) * STREAK.perDay;
+
+// ---------------------------------------------------------------------------
+// Erfolge: einmalige Ziele mit Münz-Belohnung. metric wird in storage.js aus dem Spielstand berechnet.
+// color = schaltet diesen Sonderlack frei (siehe SPECIAL_COLORS)
+// ---------------------------------------------------------------------------
+export const ACHIEVEMENTS = [
+  { id: 'first_run',  name: 'Erste Fahrt',     text: 'Beende deine erste Runde',                   metric: 'runs',         target: 1,     reward: 25 },
+  { id: 'runs_25',    name: 'Stammgast',       text: 'Fahre 25 Runden',                            metric: 'runs',         target: 25,    reward: 100 },
+  { id: 'dist_1k',    name: 'Tausender',       text: 'Fahre 1.000 m in einer Runde',               metric: 'bestDistance', target: 1000,  reward: 50 },
+  { id: 'dist_5k',    name: 'Langstrecke',     text: 'Fahre 5.000 m in einer Runde',               metric: 'bestDistance', target: 5000,  reward: 150 },
+  { id: 'dist_10k',   name: 'Zehntausender',   text: 'Fahre 10.000 m in einer Runde',              metric: 'bestDistance', target: 10000, reward: 400, color: 'gold' },
+  { id: 'near_50',    name: 'Nervenkitzel',    text: 'Schaffe 50 Beinahe-Unfälle',                 metric: 'nearMisses',   target: 50,    reward: 75 },
+  { id: 'near_500',   name: 'Haarscharf',      text: 'Schaffe 500 Beinahe-Unfälle',                metric: 'nearMisses',   target: 500,   reward: 300, color: 'pink' },
+  { id: 'smash_25',   name: 'Abrissbirne',     text: 'Zerlege 25 Autos',                           metric: 'smashed',      target: 25,    reward: 100 },
+  { id: 'over_1000',  name: 'Überholspur',     text: 'Überhole 1.000 Fahrzeuge',                   metric: 'overtakes',    target: 1000,  reward: 200 },
+  { id: 'coins_2k',   name: 'Sparschwein',     text: 'Verdiene insgesamt 2.000 Münzen',            metric: 'totalCoins',   target: 2000,  reward: 100 },
+  { id: 'coins_20k',  name: 'Goldesel',        text: 'Verdiene insgesamt 20.000 Münzen',           metric: 'totalCoins',   target: 20000, reward: 500 },
+  { id: 'garage_3',   name: 'Sammler',         text: 'Besitze 3 Autos',                            metric: 'owned',        target: 3,     reward: 150 },
+  { id: 'garage_all', name: 'Fuhrpark',        text: 'Besitze alle Autos',                         metric: 'owned',        target: CARS.length, reward: 1000 },
+  { id: 'level_7',    name: 'Weltenbummler',   text: 'Erreiche Level 7',                           metric: 'bestLevel',    target: 7,     reward: 100 },
+  { id: 'level_13',   name: 'Am Vulkan',       text: 'Erreiche Level 13',                          metric: 'bestLevel',    target: 13,    reward: 300, color: 'ice' },
+  { id: 'streak_3',   name: 'Dranbleiber',     text: 'Fahre an 3 Tagen hintereinander',            metric: 'bestStreak',   target: 3,     reward: 60 },
+  { id: 'streak_7',   name: 'Wochenserie',     text: 'Fahre an 7 Tagen hintereinander',            metric: 'bestStreak',   target: 7,     reward: 200, color: 'acid' },
+  { id: 'daily_1',    name: 'Tagesfahrer',     text: 'Fahre ein Tagesrennen',                      metric: 'dailyRuns',    target: 1,     reward: 50 },
+  { id: 'party_1',    name: 'Teamgeist',       text: 'Fahre ein Party-Rennen mit Freunden',        metric: 'partyRaces',   target: 1,     reward: 75 },
+  { id: 'hard_2k',    name: 'Nervenstark',     text: 'Fahre 2.000 m im Hardcore-Modus',            metric: 'bestHard',     target: 2000,  reward: 200 },
+];
+
+// Sonderlacke: gelten für alle Autos, sobald der Erfolg geschafft ist, der sie freischaltet.
+export const SPECIAL_COLORS = {
+  gold: { name: 'Gold',      color: '#FFD24A' },
+  pink: { name: 'Neon-Pink', color: '#FF2BD6' },
+  ice:  { name: 'Eisblau',   color: '#9FE8FF' },
+  acid: { name: 'Säuregrün', color: '#B6FF00' },
+};
+
 // ---------------------------------------------------------------------------
 // Einstellungen: EINE Liste für Oberfläche, Speicher und Spiel.
 // Wer eine Option hinzufügen will, ergänzt sie hier und wertet sie in main.js aus.

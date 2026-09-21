@@ -3830,3 +3830,66 @@ html.reduce-motion *::after {
 @media (max-width: 720px) {
   .tip { top: calc(var(--sat) + 132px); font-size: 0.92em; }
 }
+
+/* ===========================================================================
+ * Erfolge, Tagesserie, Sonderlacke
+ * ======================================================================== */
+.swatch--special { margin-left: 6px; }
+.swatch--special::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border: 1px dashed rgba(243, 245, 249, 0.45);
+  border-radius: 4px;
+  pointer-events: none;
+}
+.swatch--special.is-locked { cursor: not-allowed; filter: grayscale(0.9) brightness(0.45); }
+.swatch--special.is-locked:hover { transform: skewX(var(--sk)); }
+.swatch__lock { position: absolute; inset: 4px; width: calc(100% - 8px); height: calc(100% - 8px); color: #fff; transform: skewX(calc(var(--sk) * -1)); }
+.swatch--special:not(.is-locked) .swatch__lock { display: none; }
+
+.streak { margin: 0 0 22px; }
+.streak__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+  color: var(--muted);
+}
+.streak__head .icon { color: var(--gold); }
+.streak__head strong { color: var(--text); font-family: var(--font-cond); font-size: 1.15em; letter-spacing: 0.04em; }
+.streak__days {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+}
+.streak__day {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 8px 2px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r);
+  background: var(--raise);
+  color: var(--muted);
+}
+.streak__day b { font: 800 1.05rem/1 var(--font-cond); }
+.streak__day small { font: 700 0.72rem/1 var(--font-cond); letter-spacing: 0.04em; }
+.streak__day.is-on {
+  border-color: var(--gold);
+  background: rgba(255, 201, 60, 0.16);
+  color: var(--gold);
+  box-shadow: var(--glow-gold);
+}
+
+.mlist--ach { margin-top: 4px; }
+.ach .mcard__text strong { color: var(--text); }
+.ach .mcard__text .icon { color: var(--good); margin-right: 4px; vertical-align: -3px; }
+.ach:not(.is-done) .mcard__reward { opacity: 0.8; }
+.ach__color { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.ach__color i { width: 12px; height: 12px; border-radius: 2px; background: var(--c); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.3); }
+.section-title .sheet__count { margin-left: 8px; }

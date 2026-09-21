@@ -6,7 +6,9 @@
  * Zusätzlich gibt es einen "Snapshot" des Spielstands, der in der Cloud
  * gesichert und auf einem anderen Gerät wiederhergestellt werden kann.
  */
-import { CARS, MISSION_POOL, CONFIG, DIFFICULTY_MODES, carById, DEFAULT_SETTINGS, sanitizeSettings } from './config.js';
+import {
+  CARS, MISSION_POOL, CONFIG, DIFFICULTY_MODES, ACHIEVEMENTS, SPECIAL_COLORS, carById, DEFAULT_SETTINGS, sanitizeSettings, streakBonus,
+} from './config.js';
 
 const KEY = 'laneRacer2.profile';
 const ACTIVE_MISSIONS = 3;
@@ -20,7 +22,12 @@ export function defaultProfile() {
     selectedCar: 'blitz',
     colors: Object.fromEntries(CARS.map((c) => [c.id, c.colors[0]])),
     best: 0,
-    stats: { runs: 0, totalDistance: 0, totalCoins: 0, nearMisses: 0, smashed: 0, overtakes: 0, partyRaces: 0, dailyRuns: 0 },
+    stats: {
+      runs: 0, totalDistance: 0, totalCoins: 0, nearMisses: 0, smashed: 0, overtakes: 0, partyRaces: 0, dailyRuns: 0,
+      bestLevel: 0, bestHard: 0, bestStreak: 0, // Höchstwerte (für Erfolge)
+    },
+    streak: { last: '', count: 0 }, // letzter Fahrtag (YYYYMMDD, UTC) und Tage in Folge
+    achievements: {},               // { id: true } für geschaffte Erfolge
     missions: [],
     missionTier: {},
     daily: { key: '', best: 0 }, // bester Versuch im Tagesrennen des Tages "key" (YYYYMMDD)
@@ -42,8 +49,14 @@ function normalize(stored) {
   // Wer schon gespielt hat, braucht kein Tutorial mehr
   p.tutorialDone = typeof stored.tutorialDone === 'boolean' ? stored.tutorialDone : Number(stored.stats && stored.stats.runs) > 0;
   p.colors = { ...base.colors, ...(stored.colors || {}) };
-  // Nur erlaubte Lackfarben der jeweiligen Autos übernehmen
-  for (const car of CARS) if (!car.colors.includes(p.colors[car.id])) p.colors[car.id] = car.colors[0];
+  p.achievements = {};
+  const known = new Set(ACHIEVEMENTS.map((a) => a.id));
+  const storedAch = stored.achievements && typeof stored.achievements === 'object' ? stored.achievements : {};
+  for (const id of Object.keys(storedAch)) if (known.has(id) && storedAch[id]) p.achievements[id] = true;
+  const st = stored.streak;
+  p.streak = st && /^[0-9]{8}$/.test(String(st.last)) ? { last: String(st.last), count: Math.max(0, Math.floor(Number(st.count) || 0)) } : { ...base.streak };
+  // Nur erlaubte Lackfarben übernehmen: die des Autos oder freigeschaltete Sonderlacke
+  for (const car of CARS) if (!car.colors.includes(p.colors[car.id]) && !isColorUnlocked(p, p.colors[car.id])) p.colors[car.id] = car.colors[0];
   p.missionTier = { ...(stored.missionTier || {}) };
   p.owned = Array.isArray(stored.owned) ? stored.owned.filter((id) => CARS.some((c) => c.id === id)) : ['blitz'];
   if (!p.owned.includes('blitz')) p.owned.unshift('blitz');
@@ -95,6 +108,8 @@ export function snapshotOf(profile) {
     stats: { ...profile.stats },
     missions: profile.missions.map((m) => ({ ...m })),
     missionTier: { ...profile.missionTier },
+    streak: { ...profile.streak },
+    achievements: { ...profile.achievements },
   };
 }
 
@@ -119,6 +134,119 @@ export function adoptSnapshot(profile, data) {
   });
   Object.assign(profile, merged);
   return profile;
+}
+
+// ---------------------------------------------------------------------------
+// Erfolge, Tagesserie, Sonderlacke
+// ---------------------------------------------------------------------------
+
+/** Tagesschlüssel YYYYMMDD in UTC (derselbe Tag wie beim Tagesrennen). */
+export function dayKeyOf(date = new Date()) {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(date.getUTCDate()).padStart(2, '0');
+  return `${y}${m}${d}`;
+}
+
+/** Der Tag davor (YYYYMMDD). */
+export function previousDayKey(key) {
+  const t = Date.UTC(Number(key.slice(0, 4)), Number(key.slice(4, 6)) - 1, Number(key.slice(6, 8)));
+  return dayKeyOf(new Date(t - 86400000));
+}
+
+/** Aktueller Wert einer Erfolgs-Kennzahl. */
+export function metricValue(profile, metric) {
+  const s = profile.stats;
+  switch (metric) {
+    case 'runs': return s.runs;
+    case 'bestDistance': return profile.best;
+    case 'nearMisses': return s.nearMisses;
+    case 'smashed': return s.smashed;
+    case 'overtakes': return s.overtakes;
+    case 'totalCoins': return s.totalCoins;
+    case 'owned': return profile.owned.length;
+    case 'bestLevel': return s.bestLevel;
+    case 'bestStreak': return s.bestStreak;
+    case 'dailyRuns': return s.dailyRuns;
+    case 'partyRaces': return s.partyRaces;
+    case 'bestHard': return s.bestHard;
+    default: return 0;
+  }
+}
+
+/** Ist dieser Sonderlack (Farbwert) freigeschaltet? */
+export function isColorUnlocked(profile, color) {
+  const key = Object.keys(SPECIAL_COLORS).find((k) => SPECIAL_COLORS[k].color === color);
+  if (!key) return false;
+  return ACHIEVEMENTS.some((a) => a.color === key && profile.achievements && profile.achievements[a.id]);
+}
+
+/** Alle freigeschalteten Sonderlacke: [{ key, name, color }]. */
+export function unlockedColors(profile) {
+  return Object.entries(SPECIAL_COLORS)
+    .filter(([, def]) => isColorUnlocked(profile, def.color))
+    .map(([key, def]) => ({ key, ...def }));
+}
+
+/**
+ * Prüft alle Erfolge und schreibt die Belohnung gut.
+ * @returns {{unlocked: Array<{id,name,text,reward,color?}>, coins: number}}
+ */
+export function checkAchievements(profile) {
+  const unlocked = [];
+  let coins = 0;
+  for (const a of ACHIEVEMENTS) {
+    if (profile.achievements[a.id] || metricValue(profile, a.metric) < a.target) continue;
+    profile.achievements[a.id] = true;
+    profile.coins += a.reward;
+    profile.stats.totalCoins += a.reward;
+    coins += a.reward;
+    unlocked.push({ ...a });
+  }
+  return { unlocked, coins };
+}
+
+/** Für die Anzeige: jeder Erfolg mit Fortschritt (0–1) und Status. */
+export function achievementViews(profile) {
+  return ACHIEVEMENTS.map((a) => {
+    const value = metricValue(profile, a.metric);
+    return {
+      id: a.id,
+      name: a.name,
+      text: a.text,
+      reward: a.reward,
+      color: a.color ? { key: a.color, ...SPECIAL_COLORS[a.color] } : null,
+      done: Boolean(profile.achievements[a.id]),
+      progress: Math.min(1, value / a.target),
+      value: Math.min(value, a.target),
+      target: a.target,
+    };
+  });
+}
+
+/**
+ * Tagesserie fortschreiben (einmal pro Tag). Gibt die Serie und den Bonus zurück;
+ * bonus ist nur beim ersten Rennen eines neuen Tages größer als 0.
+ */
+export function updateStreak(profile, today = dayKeyOf()) {
+  const s = profile.streak;
+  if (s.last === today) return { count: s.count, bonus: 0, isNewDay: false };
+  s.count = s.last && s.last === previousDayKey(today) ? s.count + 1 : 1;
+  s.last = today;
+  profile.stats.bestStreak = Math.max(profile.stats.bestStreak, s.count);
+  return { count: s.count, bonus: streakBonus(s.count), isNewDay: true };
+}
+
+/**
+ * Für die Anzeige: wie lang ist die Serie heute wirklich? (Eine Serie, die gestern nicht fortgesetzt wurde, ist gerissen.)
+ * @returns {{count: number, playedToday: boolean, next: number}} next = Bonus für das nächste Rennen an einem neuen Tag
+ */
+export function streakView(profile, today = dayKeyOf()) {
+  const s = profile.streak;
+  const playedToday = s.last === today;
+  const alive = playedToday || (s.last !== '' && s.last === previousDayKey(today));
+  const count = alive ? s.count : 0;
+  return { count, playedToday, next: streakBonus(count + 1) };
 }
 
 // ---------------------------------------------------------------------------
@@ -147,7 +275,7 @@ export function selectCar(profile, carId) {
 
 export function setCarColor(profile, carId, color) {
   const car = carById(carId);
-  if (!car.colors.includes(color)) return false;
+  if (!car.colors.includes(color) && !isColorUnlocked(profile, color)) return false;
   profile.colors[car.id] = color;
   return true;
 }
@@ -259,12 +387,27 @@ export function applyRun(profile, run) {
   });
   ensureMissions(profile);
 
-  const total = subtotal + breakdown.perk + breakdown.missions;
+  // Tagesserie: Bonus beim ersten Rennen eines Tages
+  const streak = updateStreak(profile, run.dayKey || dayKeyOf());
+  breakdown.streak = streak.bonus;
+
+  s.bestLevel = Math.max(s.bestLevel, run.level || 0);
+  if (run.mode === 'hard') s.bestHard = Math.max(s.bestHard, distance);
+
+  let total = subtotal + breakdown.perk + breakdown.missions + breakdown.streak;
   profile.coins += total;
   s.totalCoins += total;
 
   const newBest = modeDef.ranked && distance > profile.best;
   if (newBest) profile.best = distance;
 
-  return { breakdown, total, completed, newBest, ranked: modeDef.ranked, mode: run.mode || 'normal' };
+  // Erfolge nach den aktualisierten Zahlen prüfen; ihre Belohnung kommt oben drauf
+  const achieved = checkAchievements(profile);
+  breakdown.achievements = achieved.coins;
+  total += achieved.coins;
+
+  return {
+    breakdown, total, completed, newBest, ranked: modeDef.ranked, mode: run.mode || 'normal',
+    streak, achievements: achieved.unlocked,
+  };
 }

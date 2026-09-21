@@ -18,6 +18,7 @@
  */
 import {
   CARS, PERKS, EMOTES, WORLDS, CONFIG, MISSION_POOL, LEVELS_PER_WORLD, VERSION, DEFAULT_SETTINGS, SETTINGS_GROUPS,
+  SPECIAL_COLORS, STREAK, streakBonus,
 } from './config.js';
 
 // ===========================================================================
@@ -49,6 +50,8 @@ const BREAKDOWN_ROWS = [
   ['distance', 'Strecke', true],
   ['perk', 'Bonus', false],
   ['missions', 'Missionen', false],
+  ['streak', 'Tagesserie', false],
+  ['achievements', 'Erfolge', false],
 ];
 const POPUP_KINDS = new Set(['near', 'combo', 'smash', 'power', 'coin']);
 const TOAST_KINDS = new Set(['level', 'world', 'mission', 'party', 'info', 'error']);
@@ -491,7 +494,7 @@ export class UI {
   }
 
   /** Garage: Karten aller Autos (einmal gebaut, danach nur aktualisiert). */
-  renderGarage({ cars = CARS, perks = PERKS, owned = [], selectedCar = null, previewCar = null, colors = {}, coins = 0 } = {}) {
+  renderGarage({ cars = CARS, perks = PERKS, owned = [], selectedCar = null, previewCar = null, colors = {}, coins = 0, extraColors = [] } = {}) {
     const g = this.gg;
     const list = Array.isArray(cars) && cars.length ? cars : CARS;
     const key = list.map((c) => c.id).join('|');
@@ -519,6 +522,7 @@ export class UI {
         color: (colors && colors[car.id]) || (car.colors && car.colors[0]),
         coins: coinCount,
         activeCar,
+        extraColors: Array.isArray(extraColors) ? extraColors : [],
       });
     }
     g.count.textContent = `${ownedCount}/${list.length}`;
@@ -626,8 +630,10 @@ export class UI {
   }
 
   /** Missionen + Gesamtstatistik. */
-  renderMissions({ missions = [], stats = {} } = {}) {
+  renderMissions({ missions = [], stats = {}, achievements = [], streak = null } = {}) {
     this._fillMissionList(this.ms.list, missions, false);
+    this._fillAchievements(achievements);
+    this._fillStreak(streak);
     const s = stats || {};
     const vals = {
       runs: fmtInt(s.runs),
@@ -1604,6 +1610,48 @@ export class UI {
     this.mn = m;
   }
 
+  /** Tagesserie: heutiger Stand und was als Nächstes winkt. */
+  _fillStreak(streak) {
+    const el = this.ms.streak;
+    const count = streak ? Math.max(0, Math.floor(num(streak.count))) : 0;
+    const playedToday = Boolean(streak && streak.playedToday);
+    el.textContent = '';
+    const days = Array.from({ length: STREAK.maxDays }, (_, i) => h('li', {
+      class: `streak__day${i < count ? ' is-on' : ''}`,
+      'aria-label': `Tag ${i + 1}: ${streakBonus(i + 1)} Münzen`,
+    }, h('b', null, String(i + 1)), h('small', null, `+${streakBonus(i + 1)}`)));
+    const next = streak && streak.next ? Math.floor(num(streak.next)) : streakBonus(1);
+    el.append(
+      h('p', { class: 'streak__head' }, icon('bolt'),
+        h('strong', null, count > 0 ? `${count} ${count === 1 ? 'Tag' : 'Tage'} in Folge` : 'Noch keine Serie'),
+        h('span', null, playedToday ? ` · morgen +${next} Münzen` : ` · heute fahren für +${next} Münzen`)),
+      h('ol', { class: 'streak__days' }, days));
+  }
+
+  /** Erfolgsliste: geschaffte zuerst nach unten, offene nach Fortschritt. */
+  _fillAchievements(items) {
+    const list = this.ms.ach;
+    list.textContent = '';
+    const arr = Array.isArray(items) ? items.filter((a) => a && typeof a === 'object') : [];
+    const done = arr.filter((a) => a.done).length;
+    this.ms.achCount.textContent = `${done}/${arr.length}`;
+    const sorted = [...arr].sort((a, b) => (a.done - b.done) || (b.progress - a.progress));
+    for (const a of sorted) {
+      const frac = clamp01(num(a.progress));
+      const li = h('li', { class: `mcard ach${a.done ? ' is-done' : ''}` },
+        h('div', { class: 'mcard__main' },
+          h('div', { class: 'mcard__row' },
+            h('span', { class: 'mcard__text' }, a.done ? icon('check') : null, h('strong', null, cleanText(a.name, 40)), ` – ${cleanText(a.text, 100)}`),
+            h('span', { class: 'mcard__reward', 'aria-label': `Belohnung ${fmtInt(a.reward)} Münzen` }, coinIcon(), `+${fmtInt(a.reward)}`)),
+          h('div', { class: 'bar', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': String(num(a.target)), 'aria-valuenow': String(num(a.value)), 'aria-label': 'Fortschritt' },
+            h('i', { class: 'bar__fill', style: { '--p': frac.toFixed(3) } })),
+          h('div', { class: 'mcard__meta' },
+            h('span', { class: 'mcard__prog' }, a.done ? 'Geschafft' : `${fmtInt(a.value)} / ${fmtInt(a.target)}`),
+            a.color ? h('span', { class: 'ach__color', style: { '--c': safeColor(a.color.color) } }, h('i', null), `Lack: ${cleanText(a.color.name, 20)}`) : null)));
+      list.append(li);
+    }
+  }
+
   /** Füllt eine Missionsliste (kompakt fürs Menü oder groß für den Missions-Bildschirm). */
   _fillMissionList(list, missions, compact) {
     const arr = Array.isArray(missions) ? missions.filter((m) => m && typeof m === 'object').slice(0, 6) : [];
@@ -1704,9 +1752,22 @@ export class UI {
         onClick: () => this._call('onSelectColor', id, color),
       }),
     }));
+    // Sonderlacke: gesperrt, bis der passende Erfolg geschafft ist
+    const specials = Object.entries(SPECIAL_COLORS).map(([key, def]) => ({
+      key,
+      color: def.color,
+      btn: h('button', {
+        type: 'button', class: 'swatch swatch--special is-locked', 'aria-pressed': 'false', disabled: true,
+        'aria-label': `Sonderlack ${def.name} (gesperrt)`, title: `${def.name} – wird durch einen Erfolg freigeschaltet`,
+        style: { '--c': safeColor(def.color) },
+        onClick: () => this._call('onSelectColor', id, def.color),
+      }, icon('lock', 'swatch__lock')),
+      name: def.name,
+    }));
     const colorsEl = h('div', { class: 'car__colors', hidden: true },
       h('span', { class: 'car__colors-label' }, 'Lack'),
-      h('div', { class: 'swatches', role: 'group', 'aria-label': `Lackierung für ${car.name}` }, swatches.map((s) => s.btn)));
+      h('div', { class: 'swatches', role: 'group', 'aria-label': `Lackierung für ${car.name}` },
+        swatches.map((s) => s.btn), specials.map((s) => s.btn)));
 
     const buy = h('button', {
       type: 'button', class: 'btn btn--gold btn--sm car__buy', 'data-sfx': 'none',
@@ -1734,15 +1795,15 @@ export class UI {
     li.addEventListener('click', (e) => {
       if (!e.target.closest('button')) this._call('onPreviewCar', id);
     });
-    return { car, li, head, statusText, statusCoin, stats, swatches, colorsEl, buy, select, activeTag, hint, key: '' };
+    return { car, li, head, statusText, statusCoin, stats, swatches, specials, colorsEl, buy, select, activeTag, hint, key: '' };
   }
 
-  _updateCarCard(card, { owned, selected, preview, color, coins, activeCar }) {
+  _updateCarCard(card, { owned, selected, preview, color, coins, activeCar, extraColors = [] }) {
     if (!card) return;
     const car = card.car;
     const price = Math.floor(num(car.price));
     const locked = !owned && coins < price;
-    const key = `${owned}|${selected}|${preview}|${color}|${locked}|${activeCar ? activeCar.id : ''}|${locked ? coins : ''}`;
+    const key = `${owned}|${selected}|${preview}|${color}|${locked}|${activeCar ? activeCar.id : ''}|${locked ? coins : ''}|${extraColors.join(',')}`;
     if (key === card.key) return;
     card.key = key;
 
@@ -1758,6 +1819,14 @@ export class UI {
 
     card.colorsEl.hidden = !owned;
     for (const s of card.swatches) s.btn.setAttribute('aria-pressed', s.color === color ? 'true' : 'false');
+    for (const s of card.specials) {
+      const open = extraColors.includes(s.color);
+      s.btn.disabled = !open;
+      s.btn.classList.toggle('is-locked', !open);
+      s.btn.setAttribute('aria-pressed', open && s.color === color ? 'true' : 'false');
+      s.btn.setAttribute('aria-label', open ? `Sonderlack ${s.name}` : `Sonderlack ${s.name} (gesperrt)`);
+      s.btn.title = open ? s.name : `${s.name} – wird durch einen Erfolg freigeschaltet`;
+    }
 
     card.buy.hidden = owned;
     card.buy.classList.toggle('is-locked', locked);
@@ -2181,10 +2250,17 @@ export class UI {
       ms.stats[key] = dd;
       return h('div', { class: 'stat-tile' }, h('dt', { class: 'stat-tile__label' }, icon(ic), label), dd);
     }));
+    ms.streak = h('div', { class: 'streak' });
+    ms.ach = h('ul', { class: 'mlist mlist--ach' });
+    ms.achCount = h('span', { class: 'sheet__count' }, '0/0');
     this._sheet('missions', { kicker: 'Aufträge', title: 'Missionen' },
       h('div', { class: 'sheet__body' },
         ms.list,
         h('p', { class: 'muted-note' }, 'Missionen werden am Ende jeder Runde geprüft. Geschaffte Missionen zahlen Münzen aus und werden durch neue, härtere ersetzt.'),
+        h('h3', { class: 'section-title' }, 'Tagesserie'),
+        ms.streak,
+        h('h3', { class: 'section-title' }, 'Erfolge ', ms.achCount),
+        ms.ach,
         h('h3', { class: 'section-title' }, 'Deine Statistik'),
         grid));
     this.ms = ms;

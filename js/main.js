@@ -6,11 +6,12 @@
  */
 import * as THREE from 'three';
 import {
-  CONFIG, SUPABASE, CARS, PERKS, WORLDS, POWERUPS, carById, VERSION, DEFAULT_SETTINGS, sanitizeSettings,
+  CONFIG, SUPABASE, CARS, PERKS, WORLDS, POWERUPS, SPECIAL_COLORS, carById, VERSION, DEFAULT_SETTINGS, sanitizeSettings,
   WORLD_TIMES, TIME_LABELS, WORLD_HILL_COLOR,
 } from './config.js';
 import {
   loadProfile, saveProfile, buyCar, selectCar, setCarColor, colorOf, applyRun, selectedCarOf,
+  checkAchievements, achievementViews, unlockedColors, streakView,
   snapshotOf, adoptSnapshot, progressOf,
 } from './storage.js';
 import { World } from './world.js';
@@ -197,6 +198,13 @@ function boot() {
   requestAnimationFrame(frame);
   announceChallenge();
   registerServiceWorker();
+
+  // Erfolge, die ein älterer Spielstand schon verdient hat, werden nachträglich gutgeschrieben
+  const late = checkAchievements(profile);
+  if (late.unlocked.length) {
+    saveProfile(profile);
+    setTimeout(() => announceAchievements(late.unlocked), 1200);
+  }
 
   // Für Neugierige in der Browser-Konsole
   window.laneRacer = { VERSION, app, profile, game, world, effects, audio, online, ui, camera, renderer, structures, frame };
@@ -448,6 +456,7 @@ function renderGarage() {
     previewCar: app.previewCar,
     colors: profile.colors,
     coins: profile.coins,
+    extraColors: unlockedColors(profile).map((c) => c.color),
   });
 }
 
@@ -464,15 +473,29 @@ function purchaseCar(carId) {
     ui.toast('Kauf nicht möglich', result.error, 'error');
     return;
   }
+  const achieved = checkAchievements(profile); // z. B. "Sammler" beim dritten Auto
   saveProfile(profile);
   audio.play('buy');
   ui.toast(`${carById(carId).name} gehört dir!`, 'Direkt ausgewählt – ab auf die Straße.', 'info');
+  announceAchievements(achieved.unlocked);
   app.previewCar = carId;
   game.setPlayerCar(carId, colorOf(profile, carId));
   syncPlayerOnline();
   scheduleCloudSave();
   renderGarage();
   renderTopBar();
+}
+
+/** Toast für jeden neu geschafften Erfolg. */
+function announceAchievements(list) {
+  for (const a of list) {
+    const extra = a.color ? ` · Neuer Lack: ${SPECIAL_COLORS[a.color].name}` : '';
+    ui.toast(`Erfolg: ${a.name}`, `${a.text}  +${a.reward} Münzen${extra}`, 'mission');
+  }
+  if (list.length) {
+    audio.play('mission');
+    renderTopBar();
+  }
 }
 
 function chooseCar(carId) {
@@ -494,8 +517,12 @@ function chooseColor(carId, color) {
   renderGarage();
 }
 
+function renderMissionsScreen() {
+  ui.renderMissions({ missions: profile.missions, stats: profile.stats, achievements: achievementViews(profile), streak: streakView(profile) });
+}
+
 function openMissions() {
-  ui.renderMissions({ missions: profile.missions, stats: profile.stats });
+  renderMissionsScreen();
   setScreen('missions');
 }
 
@@ -1316,6 +1343,10 @@ async function finishRun(result) {
     ui.toast('Mission erfüllt!', `${m.text}  +${m.reward} Münzen`, 'mission');
     audio.play('mission');
   }
+  if (summary.streak.bonus > 0) {
+    ui.toast(`Tagesserie: ${summary.streak.count} ${summary.streak.count === 1 ? 'Tag' : 'Tage'}`, `Bonus +${summary.streak.bonus} Münzen – komm morgen wieder!`, 'info');
+  }
+  announceAchievements(summary.achievements);
 
   if (!canSubmit) {
     // Später erneut versuchen, falls die Registrierung noch fehlt
