@@ -9,6 +9,7 @@
 import { sanitizeCampaign, defaultCampaign, totalStars, levelInfo, CAMPAIGN_MAPS } from './campaign.js';
 import {
   CARS, MISSION_POOL, CONFIG, DIFFICULTY_MODES, ACHIEVEMENTS, SPECIAL_COLORS, carById, DEFAULT_SETTINGS, sanitizeSettings, streakBonus,
+  WEEKLY_ITEMS,
 } from './config.js';
 
 const KEY = 'laneRacer2.profile';
@@ -31,6 +32,8 @@ export function defaultProfile() {
     streak: { last: '', count: 0 }, // letzter Fahrtag (YYYYMMDD, UTC) und Tage in Folge
     achievements: {},               // { id: true } für geschaffte Erfolge
     campaign: defaultCampaign(),    // Sterne, Bestwerte und XP der Kampagne (siehe campaign.js)
+    trophies: { gold: 0, silver: 0, bronze: 0 }, // Podiumsplätze der Wochenwertung
+    weekly: { applied: [] },        // Wochen, deren Belohnung schon gutgeschrieben wurde (verhindert doppelte Auszahlung)
     missions: [],
     missionTier: {},
     daily: { key: '', best: 0 }, // bester Versuch im Tagesrennen des Tages "key" (YYYYMMDD)
@@ -58,6 +61,10 @@ function normalize(stored) {
     : null;
   p.colors = { ...base.colors, ...(stored.colors || {}) };
   p.campaign = sanitizeCampaign(stored.campaign);
+  p.trophies = { gold: 0, silver: 0, bronze: 0 };
+  for (const k of Object.keys(p.trophies)) p.trophies[k] = Math.max(0, Math.min(9999, Math.floor(Number(stored.trophies && stored.trophies[k]) || 0)));
+  const applied = stored.weekly && Array.isArray(stored.weekly.applied) ? stored.weekly.applied : [];
+  p.weekly = { applied: applied.filter((w) => typeof w === 'string' && w.length <= 40).slice(-40) };
   p.achievements = {};
   const known = new Set(ACHIEVEMENTS.map((a) => a.id));
   const storedAch = stored.achievements && typeof stored.achievements === 'object' ? stored.achievements : {};
@@ -120,6 +127,8 @@ export function snapshotOf(profile) {
     streak: { ...profile.streak },
     achievements: { ...profile.achievements },
     campaign: sanitizeCampaign(profile.campaign),
+    trophies: { ...profile.trophies },
+    weekly: { applied: [...profile.weekly.applied] },
   };
 }
 
@@ -176,6 +185,7 @@ export function metricValue(profile, metric) {
     case 'overtakes': return s.overtakes;
     case 'totalCoins': return s.totalCoins;
     case 'owned': return profile.owned.length;
+    case 'ownedBuyable': return profile.owned.filter((id) => !carById(id).exclusive).length;
     case 'bestLevel': return s.bestLevel;
     case 'bestStreak': return s.bestStreak;
     case 'dailyRuns': return s.dailyRuns;
@@ -193,6 +203,8 @@ export function metricValue(profile, metric) {
 export function isColorUnlocked(profile, color) {
   const key = Object.keys(SPECIAL_COLORS).find((k) => SPECIAL_COLORS[k].color === color);
   if (!key) return false;
+  const trophy = SPECIAL_COLORS[key].trophy;
+  if (trophy && profile.trophies && profile.trophies[trophy] > 0) return true;
   return ACHIEVEMENTS.some((a) => a.color === key && profile.achievements && profile.achievements[a.id]);
 }
 
@@ -265,6 +277,46 @@ export function streakView(profile, today = dayKeyOf()) {
 }
 
 // ---------------------------------------------------------------------------
+// Wochenwertung: Belohnungen gutschreiben
+// ---------------------------------------------------------------------------
+
+/**
+ * Schreibt abgeholte Wochenbelohnungen gut. Jede Woche zählt nur einmal (weekly.applied), auch wenn der Server
+ * sie mehrfach meldet (z. B. nach einem Abbruch vor der Bestätigung).
+ * @param rewards [{ week: string (ISO), rank, score, coins, item: 'champion'|'silver'|'bronze'|null }]
+ * @returns [{ week, rank, score, coins, item, bonus, newCar }] – nur die tatsächlich neu gutgeschriebenen
+ */
+export function applyWeeklyRewards(profile, rewards) {
+  const done = [];
+  for (const r of Array.isArray(rewards) ? rewards : []) {
+    if (!r || typeof r !== 'object') continue;
+    const week = String(r.week || '');
+    if (!week || profile.weekly.applied.includes(week)) continue;
+    const rank = Math.floor(Number(r.rank)) || 0;
+    const coins = Math.max(0, Math.min(5000, Math.floor(Number(r.coins)) || 0));
+    if (rank < 1) continue;
+    let bonus = 0;
+    let newCar = false;
+    const item = WEEKLY_ITEMS[r.item] ? r.item : null;
+    if (item === 'champion') {
+      profile.trophies.gold += 1;
+      if (profile.owned.includes('apex')) bonus = 1000; // Auto schon da → Extra-Münzen für jeden weiteren Sieg
+      else { profile.owned.push('apex'); newCar = true; }
+    } else if (item === 'silver') {
+      profile.trophies.silver += 1;
+    } else if (item === 'bronze') {
+      profile.trophies.bronze += 1;
+    }
+    profile.coins += coins + bonus;
+    profile.stats.totalCoins += coins + bonus;
+    profile.weekly.applied.push(week);
+    profile.weekly.applied = profile.weekly.applied.slice(-40);
+    done.push({ week, rank, score: Math.floor(Number(r.score)) || 0, coins, item, bonus, newCar });
+  }
+  return done;
+}
+
+// ---------------------------------------------------------------------------
 // Garage
 // ---------------------------------------------------------------------------
 export const selectedCarOf = (profile) => carById(profile.selectedCar);
@@ -272,6 +324,7 @@ export const colorOf = (profile, carId) => profile.colors[carId] || carById(carI
 
 export function buyCar(profile, carId) {
   const car = carById(carId);
+  if (car.exclusive) return { ok: false, error: 'Dieses Auto gibt es nur als Preis der Wochenwertung.' };
   if (profile.owned.includes(car.id)) return { ok: false, error: 'Schon in deiner Garage.' };
   if (profile.coins < car.price) {
     return { ok: false, error: `Dir fehlen noch ${(car.price - profile.coins).toLocaleString('de-DE')} Münzen.` };

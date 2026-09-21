@@ -72,8 +72,8 @@ describe('Erfolge', () => {
       assert.equal(typeof metricValue(p, a.metric), 'number', `${a.id}: Kennzahl ${a.metric}`);
       if (a.color) assert.ok(SPECIAL_COLORS[a.color], `${a.id}: Lack ${a.color}`);
     }
-    for (const key of Object.keys(SPECIAL_COLORS)) assert.ok(ACHIEVEMENTS.some((a) => a.color === key), `Lack ${key} ist erreichbar`);
-    assert.equal(ACHIEVEMENTS.find((a) => a.id === 'garage_all').target, CARS.length);
+    for (const [key, def] of Object.entries(SPECIAL_COLORS)) assert.ok(def.trophy || ACHIEVEMENTS.some((a) => a.color === key), `Lack ${key} ist erreichbar`);
+    assert.equal(ACHIEVEMENTS.find((a) => a.id === 'garage_all').target, CARS.filter((c) => !c.exclusive).length);
   });
 
   it('werden genau einmal freigeschaltet und zahlen ihre Belohnung', () => {

@@ -4145,3 +4145,44 @@ button.cmap:hover { border-color: var(--signal); box-shadow: 0 6px 22px rgba(255
 .camp-goals__text { flex: 1 1 auto; min-width: 0; }
 .camp-reward { margin: 0 0 8px; color: var(--gold); font-weight: 700; font-size: 0.9rem; }
 .go__camp .camp-xp { margin-top: 4px; }
+
+/* ===========================================================================
+ * Wochenwertung, Belohnungs-Fenster
+ * ======================================================================== */
+.week { margin: 0 0 16px; padding: 14px 16px; border: 1px solid var(--hairline); border-left: 3px solid var(--gold); border-radius: var(--r); background: var(--raise); }
+.week__head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; margin-bottom: 10px; }
+.week__label { color: var(--muted); font: 700 0.75rem/1 var(--font-cond); letter-spacing: 0.12em; text-transform: uppercase; }
+.week__count { font: 800 1.35rem/1 var(--font-display); color: var(--gold); }
+.week__reset { flex: 1 1 100%; color: var(--muted); font-size: 0.78rem; }
+.week__live { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; color: var(--good); font: 800 0.72rem/1 var(--font-cond); letter-spacing: 0.12em; text-transform: uppercase; }
+.week__live i { width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 0 rgba(124, 242, 156, 0.6); animation: lr-live 1.6s ease-out infinite; }
+@keyframes lr-live { to { box-shadow: 0 0 0 9px rgba(124, 242, 156, 0); } }
+.week__prizes { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 6px; }
+.week__prize { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--r); background: rgba(8, 11, 16, 0.5); border: 1px solid var(--hairline); }
+.week__prize--champion { border-color: rgba(255, 201, 60, 0.7); background: linear-gradient(90deg, rgba(255, 201, 60, 0.16), rgba(8, 11, 16, 0.5)); }
+.week__prize--silver { border-color: rgba(217, 222, 231, 0.5); }
+.week__prize--bronze { border-color: rgba(205, 127, 50, 0.55); }
+.week__medal { font-size: 1.6rem; line-height: 1; }
+.week__prize-text { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; font-size: 0.8rem; color: var(--muted); }
+.week__prize-text strong { color: var(--text); font: 800 0.95rem/1.1 var(--font-cond); letter-spacing: 0.04em; text-transform: uppercase; }
+.week__coins { display: inline-flex; align-items: center; gap: 5px; color: var(--gold); font: 800 0.95rem/1 var(--font-cond); white-space: nowrap; }
+.week__more { margin: 0 0 8px; color: var(--muted); font-size: 0.78rem; }
+.week__me { margin: 0 0 10px; font-weight: 600; font-size: 0.9rem; }
+.week__invite { display: flex; gap: 8px; flex-wrap: wrap; }
+.lb-row__prize { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; color: var(--gold); font: 700 0.78rem/1 var(--font-cond); white-space: nowrap; }
+.lb-row:has(.lb-row__prize) { grid-template-columns: 2.4em 10px minmax(0, 1fr) auto auto auto; }
+.tag--gold { background: rgba(255, 201, 60, 0.2); color: var(--gold); }
+
+.wr { position: absolute; inset: 0; z-index: var(--z-modal); display: grid; place-items: center; padding: 16px; }
+.wr[hidden] { display: none; }
+.wr__backdrop { position: absolute; inset: 0; background: rgba(4, 6, 10, 0.86); }
+.wr__card { position: relative; width: min(460px, 100%); max-height: 100%; overflow: auto; padding: 22px 22px 18px; border: 1px solid rgba(255, 201, 60, 0.6); border-radius: var(--r-lg); background: linear-gradient(180deg, #1b2130, #0d1118); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 40px rgba(255, 201, 60, 0.15); animation: lr-enter 0.3s cubic-bezier(0.2, 0.8, 0.3, 1) both; text-align: center; }
+.wr__title { margin: 0 0 14px; font: 800 1.5rem/1.1 var(--font-display); }
+.wr__list { display: grid; gap: 10px; margin-bottom: 12px; text-align: left; }
+.wr__item { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--hairline); border-radius: var(--r); background: var(--raise); }
+.wr__item--champion { border-color: rgba(255, 201, 60, 0.8); background: linear-gradient(90deg, rgba(255, 201, 60, 0.2), var(--raise)); }
+.wr__medal { font-size: 2.4rem; line-height: 1; }
+.wr__text { flex: 1 1 auto; display: grid; gap: 3px; font-size: 0.85rem; color: var(--muted); }
+.wr__text strong { color: var(--text); font-size: 1rem; }
+.wr__prize { color: var(--gold); font-weight: 700; }
+.wr__total { margin: 0 0 12px; color: var(--gold); font-weight: 800; }

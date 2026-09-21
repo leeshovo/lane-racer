@@ -94,9 +94,34 @@ Im Hauptmenü unter **Einstellungen** (im Spiel auch über die Pause). Sie sind 
 
 Einstellungen gehören zum Gerät und werden nicht mit der Cloud synchronisiert.
 
+## Wochenwertung mit Preisen
+
+Die **Rangliste „Diese Woche“** ist live (aktualisiert sich alle paar Sekunden) und **startet jeden Mittwoch um 12:00 Uhr
+(deutsche Zeit) neu**, damit nicht immer dieselben oben stehen. Gewertet wird der beste Score der Woche.
+
+| Platz | Preis |
+|---|---|
+| 1 | 1.500 Münzen + exklusives Auto **Apex Champion** (nicht kaufbar) + Lack „Krone“ + Titel Wochensieger |
+| 2 | 1.000 Münzen + exklusiver Lack „Chrom-Silber“ + Titel Vizemeister |
+| 3 | 750 Münzen + exklusiver Lack „Bronze-Glut“ + Titel Podium |
+| 4 – 10 | 500, 400, 320, 260, 210, 170, 140 Münzen |
+| 11 – 15 / 16 – 25 / 26 – 50 | 100 / 70 / 40 Münzen |
+| ab 51 | 25 Münzen (jeder mit mindestens einem Punkt) |
+
+Die Lacke gelten für alle Autos. Gewinnt man nochmal, gibt es beim Auto-Sieg 1.000 Extra-Münzen.
+
+- **Einladungslink:** In der Wochen-Rangliste auf „Freunde einladen“ drücken und den Link schicken. Wer ihn öffnet, gibt
+  nur seinen Namen ein und ist **sofort in der Wertung** (mit 0 m) und mit dir befreundet.
+- **Belohnungen:** Nach dem Wochenende holt das Spiel sie beim nächsten Start automatisch ab und zeigt sie in einem Fenster.
+  Sie bleiben in der Datenbank gespeichert, bis sie abgeholt sind – auch wenn du gerade offline warst. Doppelte
+  Auszahlung ist ausgeschlossen (Bestätigung erst nach dem Speichern, Woche wird lokal vermerkt).
+- **Technik:** Die Woche, die Rangfolge und die Preise werden in der Datenbank berechnet
+  (`supabase/migrations/20260921_weekly_ranking.sql`). Es gibt keinen Server, der laufen muss: Vergangene Wochen werden
+  beim ersten Abruf danach abgeschlossen. Die Preistabelle steht dort und in `js/config.js` (ein Test prüft, dass beide gleich sind).
+
 ## Online mit Freunden
 
-- **Rangliste:** Allzeit, diese Woche, heute und **unter Freunden**.
+- **Rangliste:** diese Woche (live, mit Preisen), Allzeit, heute und **unter Freunden**.
 - **Freunde:** Eigene Kachel im Hauptmenü. Dort steht dein Freundescode (6 Zeichen). Wer ihn eingibt oder deinen Link
   (`?friend=CODE`) öffnet, ist gegenseitig mit dir verbunden – ihr seht Namen und Rekorde des anderen. Höchstens
   50 Freunde, jederzeit entfernbar. Der Code verrät nur, was ohnehin in der weltweiten Rangliste steht.

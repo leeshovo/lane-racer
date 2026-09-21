@@ -11,14 +11,14 @@ import {
 } from './config.js';
 import {
   loadProfile, saveProfile, buyCar, selectCar, setCarColor, colorOf, applyRun, selectedCarOf,
-  checkAchievements, achievementViews, unlockedColors, streakView,
+  checkAchievements, achievementViews, unlockedColors, streakView, applyWeeklyRewards,
 } from './storage.js';
 import { World } from './world.js';
 import { Effects } from './effects.js';
 import { AudioManager } from './audio.js';
 import {
   Online, partyCodeFromUrl, partyShareUrl, normalizePartyCode, generatePartyCode,
-  friendCodeFromUrl,
+  friendCodeFromUrl, friendShareUrl,
   dailyKey, dailyRaceId,
 } from './online.js';
 import { updateBend, setBendEnabled } from './bend.js';
@@ -65,6 +65,8 @@ const app = {
   cloud: { savedAt: null, timer: 0 },
   tutorial: null,       // Tipps der ersten Runde (null = keine)
   activeMap: null,      // Kampagnenkarte der laufenden Runde
+  week: null,           // { endsAt, offset } der laufenden Wochenwertung (Serverzeit)
+  invited: false,       // Dieser Besuch kam über einen Einladungslink (neuer Spieler)
   resumeAt: 0,          // Zeitpunkt (ms), an dem es nach der Pause weitergeht (0 = kein Rückwärtszählen läuft)
   resumeShown: 0,       // zuletzt angezeigte Zahl des Rückwärtszählens
   settingsFromPause: false, // Einstellungen wurden aus der Pause geöffnet (Zurück führt zur Pause)
@@ -153,6 +155,9 @@ const ui = new UI({
     onPartyFriend: (code) => friends.addFromParty(code),
     onOpenFriends: () => openFriends(),
     onOpenCampaign: () => openCampaign(),
+    onWeekInvite: () => inviteToWeek(false),
+    onWeekShare: () => inviteToWeek(true),
+    onWeekRewardClose: () => ui.hideWeekRewards(),
     onStartMap: (id) => startMap(id),
     onNextMap: () => { const m = mapById(app.lastStart && app.lastStart.map && app.lastStart.map.id); const n = nextMapOf(m); if (n) startMap(n.id); },
     onFriendCopy: () => friends.copyLink(),
@@ -231,9 +236,14 @@ function boot() {
   });
   online.init().then(async (ok) => {
     renderTopBar();
+    if (ok && !profile.name && app.pendingFriend) {
+      online.inviteInfo(app.pendingFriend).then((r) => { if (r.name) ui.setInviter(r.name); });
+    }
     if (ok && profile.name) {
       await ensureRegistered();
       await cloud.pull();
+      if (profile.online) online.joinWeek(profile.online);
+      claimWeeklyRewards({ force: true });
       if (app.pendingFriend) friends.acceptLink();
       if (app.pendingParty) joinParty(app.pendingParty);
       else if (profile.lastParty && !app.party) joinParty(profile.lastParty.code, { silent: true }); // Party bleibt bestehen
@@ -244,7 +254,8 @@ function boot() {
   renderMenu();
   if (!profile.name) {
     setScreen('menu');
-    ui.askName({ initial: '', mode: 'first' });
+    app.invited = Boolean(app.pendingFriend);
+    ui.askName({ initial: '', mode: 'first', invited: app.invited });
   } else if (app.pendingParty) {
     openParty();
   } else {
@@ -519,6 +530,7 @@ function toMenu() {
   renderMenu();
   renderTopBar();
   setScreen('menu');
+  claimWeeklyRewards();
 }
 
 function openGarage() {
@@ -750,15 +762,20 @@ async function openFriends() {
   loadLeaderboard('friends');
 }
 
-async function openLeaderboard() {
+function openLeaderboardWeekly() {
   setScreen('leaderboard');
-  loadLeaderboard(app.party ? 'party' : 'global');
+  loadLeaderboard('weekly');
 }
 
-async function loadLeaderboard(kind) {
+async function openLeaderboard() {
+  setScreen('leaderboard');
+  loadLeaderboard(app.party ? 'party' : 'weekly');
+}
+
+async function loadLeaderboard(kind, { silent = false } = {}) {
   app.leaderboardKind = kind;
   const base = { kind, meId: profile.online?.id ?? null, partyCode: app.partyCode };
-  ui.renderLeaderboard({ ...base, rows: [], loading: true, error: null });
+  if (!silent) ui.renderLeaderboard({ ...base, rows: [], loading: true, error: null });
   if (online.status === 'offline') {
     ui.renderLeaderboard({ ...base, rows: [], loading: false, error: 'Keine Verbindung zur Rangliste. Prüfe deine Internetverbindung.' });
     return;
@@ -767,10 +784,86 @@ async function loadLeaderboard(kind) {
     await friends.load(base);
     return;
   }
+  if (kind === 'weekly') {
+    if (profile.online) online.joinWeek(profile.online); // wer die Wertung ansieht, ist dabei (idempotent)
+    const [res, info] = await Promise.all([online.leaderboard(kind), online.weekInfo()]);
+    if (app.leaderboardKind !== kind || app.screen !== 'leaderboard') return;
+    if (!info.error) app.week = { endsAt: info.endsAt, offset: info.offset };
+    ui.renderLeaderboard({ ...base, rows: res.rows || [], loading: false, error: res.error || null });
+    if (!res.error) {
+      const rows = res.rows || [];
+      const mine = base.meId ? rows.find((r) => r.id === base.meId) : null;
+      ui.renderWeek({
+        endsAt: app.week ? app.week.endsAt : 0,
+        offset: app.week ? app.week.offset : 0,
+        rank: mine ? mine.rank : 0,
+        best: mine ? mine.best : 0,
+        players: rows.filter((r) => r.best > 0).length,
+        canShare: Boolean(navigator.share),
+      });
+    }
+    return;
+  }
   const res = await online.leaderboard(kind, kind === 'daily' ? dailyKey() : app.partyCode);
   if (app.leaderboardKind !== kind || app.screen !== 'leaderboard') return; // inzwischen anderer Tab
   ui.renderLeaderboard({ ...base, rows: res.rows || [], loading: false, error: res.error || null });
 }
+
+// Live: Solange die Wochenwertung offen ist, wird sie alle paar Sekunden neu geladen
+const LIVE_BOARD_MS = 6000;
+setInterval(() => {
+  if (document.hidden || app.screen !== 'leaderboard' || app.leaderboardKind !== 'weekly' || online.status !== 'online') return;
+  loadLeaderboard('weekly', { silent: true });
+}, LIVE_BOARD_MS);
+
+/** Einladungslink kopieren (oder teilen): Wer ihn öffnet, meldet sich mit Namen an und ist sofort in der Wochenwertung. */
+async function inviteToWeek(share) {
+  if (!(await ensureRegistered())) {
+    ui.toast('Einladen', 'Dafür brauchst du eine Verbindung und einen Namen.', 'error');
+    return;
+  }
+  if (!app.friendCode) {
+    const fc = await online.friendCode(profile.online);
+    if (fc.code) app.friendCode = fc.code;
+  }
+  if (!app.friendCode) {
+    ui.toast('Einladen', 'Der Link konnte nicht erstellt werden. Versuch es gleich noch mal.', 'error');
+    return;
+  }
+  const url = friendShareUrl(app.friendCode);
+  if (share && navigator.share) {
+    navigator.share({ title: 'Lane Racer', text: `Fahr mit mir in der Wochen-Rangliste von Lane Racer – es gibt Preise! ${profile.name} lädt dich ein.`, url }).catch(() => {});
+    return;
+  }
+  if (await copyToClipboard(url)) ui.toast('Einladungslink kopiert', 'Wer ihn öffnet, gibt seinen Namen ein und ist sofort in der Wochen-Rangliste.', 'party');
+  else ui.toast('Kopieren nicht möglich', url, 'error');
+}
+
+// ---------------------------------------------------------------------------
+// Wochenbelohnungen abholen (Platz 1–3: Sonderpreise, alle: Münzen)
+// ---------------------------------------------------------------------------
+let lastClaimAt = 0;
+async function claimWeeklyRewards({ force = false } = {}) {
+  const busy = game && (game.state === 'playing' || game.state === 'countdown' || game.state === 'crashed' || game.state === 'finished');
+  if (!profile.online || online.status !== 'online' || busy || app.screen === 'gameover' || app.screen === 'hud') return;
+  const t = Date.now();
+  if (!force && t - lastClaimAt < 60000) return;
+  lastClaimAt = t;
+  const res = await online.claimRewards(profile.online);
+  if (res.error || !res.rewards.length) return;
+  const applied = applyWeeklyRewards(profile, res.rewards); // dedupliziert über weekly.applied
+  saveProfile(profile);
+  cloud.scheduleSave(800);
+  await online.ackRewards(profile.online, res.rewards.map((r) => r.week)); // erst nach dem Speichern bestätigen
+  if (applied.length) {
+    audio.play('record');
+    renderTopBar();
+    renderMenu();
+    if (app.screen === 'garage') renderGarage();
+    ui.showWeekRewards(applied);
+  }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) claimWeeklyRewards(); });
 
 // ===========================================================================
 // Name & Online-Identität
@@ -821,6 +914,15 @@ async function submitName(raw) {
     syncPlayerOnline();
   } else {
     await ensureRegistered();
+  }
+  if (mode === 'first' && profile.online) {
+    await online.joinWeek(profile.online); // ab jetzt in der Wertung (0 m), auch ohne gefahrene Runde
+    if (app.invited || app.pendingFriend) {
+      app.invited = false;
+      await friends.acceptLink(); // mit dem Einladenden befreunden
+      ui.toast('Willkommen!', 'Du bist in der Wochen-Rangliste. Fahr los und hol dir Punkte!', 'party');
+      openLeaderboardWeekly();
+    }
   }
   if (app.pendingParty && !app.party) joinParty(app.pendingParty);
 }

@@ -26,6 +26,17 @@ export const fmtTime = (sec) => {
   const s = Math.max(0, Math.floor(num(sec)));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
+/** Restzeit als Text: "2 Tg 3 Std", "5 Std 12 Min", "3 Min". */
+export const fmtCountdown = (ms) => {
+  const total = Math.max(0, Math.floor(num(ms) / 1000));
+  const d = Math.floor(total / 86400);
+  const hh = Math.floor((total % 86400) / 3600);
+  const mm = Math.floor((total % 3600) / 60);
+  if (d > 0) return `${d} Tg ${hh} Std`;
+  if (hh > 0) return `${hh} Std ${mm} Min`;
+  if (mm > 0) return `${mm} Min`;
+  return 'weniger als 1 Min';
+};
 /** Stat-Werte liegen zwischen 0,9 und 1,3 → Anteil 0..1 für die Balken. */
 export const statFrac = (v) => Math.min(1, Math.max(0.06, (num(v) - 0.9) / 0.4));
 /** true, wenn sich zwei Zahlen um mehr als eps unterscheiden (NaN zählt als geändert). */

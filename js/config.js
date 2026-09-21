@@ -3,7 +3,7 @@
  * Einheiten: Meter, Sekunden, m/s (× 3,6 = km/h). Fahrtrichtung = -z.
  */
 
-export const VERSION = '2.5.0';
+export const VERSION = '2.6.0';
 
 // Öffentliche Supabase-Zugangsdaten (Publishable Key darf im Browser stehen –
 // geschützt wird über Row Level Security und geprüfte Server-Funktionen).
@@ -230,6 +230,14 @@ export const CARS = [
     colors: ['#c0c7d1', '#ffd700', '#00ffa3', '#ff3b4e'],
     stats: { speed: 1.18, handling: 1.15, nitro: 1.3 }, perk: 'magnet',
   },
+  {
+    // Nur als Preis der Wochenwertung (Platz 1) – nicht kaufbar
+    id: 'apex', name: 'Apex Champion', model: 'formula', price: 0, exclusive: 'weekly',
+    ability: { id: 'hop', name: 'Meistersprung', text: 'Springt in hohem Bogen über den Verkehr', cooldown: 15, duration: 1.4 },
+    description: 'Der Pokal auf vier Rädern. Nur für den Sieger der Wochenwertung.',
+    colors: ['#FFD24A', '#f4f6fa', '#15181d'],
+    stats: { speed: 1.2, handling: 1.25, nitro: 1.3 }, perk: 'magnet',
+  },
 ];
 export const carById = (id) => CARS.find((c) => c.id === id) || CARS[0];
 
@@ -300,6 +308,34 @@ export const MISSION_POOL = [
 // Power-ups in Farben, die auch bei Rot-Grün-Schwäche unterscheidbar sind (zusätzlich hat jedes eine eigene Form)
 export const POWERUP_COLORBLIND = { nitro: '#00E5FF', shield: '#FFFFFF', magnet: '#FF8A00', double: '#FFE600' };
 
+// ---------------------------------------------------------------------------
+// Wochenwertung: Reset jeden Mittwoch 12:00 Uhr (Europe/Berlin), berechnet in der Datenbank (week_start).
+// Die Preistabelle steht hier UND in der Datenbank (week_prize_coins) – bitte beide zusammen ändern.
+// ---------------------------------------------------------------------------
+export const WEEKLY_RESET = 'Mittwoch 12:00 Uhr';
+
+/** Sonderpreise für die ersten drei Plätze (item-Kürzel wie in der Datenbank). */
+export const WEEKLY_ITEMS = {
+  champion: { rank: 1, medal: '🥇', title: 'Wochensieger',  name: 'Apex Champion',  text: 'Exklusives Auto „Apex Champion“, Lack „Krone“ und der Titel Wochensieger' },
+  silver:   { rank: 2, medal: '🥈', title: 'Vizemeister',   name: 'Chrom-Silber',   text: 'Exklusiver Lack „Chrom-Silber“ für alle Autos und der Titel Vizemeister' },
+  bronze:   { rank: 3, medal: '🥉', title: 'Podium',        name: 'Bronze-Glut',    text: 'Exklusiver Lack „Bronze-Glut“ für alle Autos und der Titel Podium' },
+};
+
+/** Münzen je Platz: 1 = 1500, 2 = 1000, 3 = 750, dann immer weniger; jeder mit Punkten bekommt mindestens 25. */
+export function weeklyPrizeCoins(rank) {
+  const table = { 1: 1500, 2: 1000, 3: 750, 4: 500, 5: 400, 6: 320, 7: 260, 8: 210, 9: 170, 10: 140 };
+  const r = Math.floor(Number(rank));
+  if (!(r >= 1)) return 0;
+  if (table[r]) return table[r];
+  if (r <= 15) return 100;
+  if (r <= 25) return 70;
+  if (r <= 50) return 40;
+  return 25;
+}
+
+/** Sonderpreis-Kürzel für einen Platz (oder null). */
+export const weeklyItemForRank = (rank) => ({ 1: 'champion', 2: 'silver', 3: 'bronze' }[rank] || null);
+
 export const EMOTES = ['👍', '🔥', '😂', '😱', '🏁', '💀'];
 
 // Schnellnachrichten für die Party: feste Sätze statt freiem Chat (kein Missbrauch, keine Moderation nötig)
@@ -336,7 +372,7 @@ export const ACHIEVEMENTS = [
   { id: 'coins_2k',   name: 'Sparschwein',     text: 'Verdiene insgesamt 2.000 Münzen',            metric: 'totalCoins',   target: 2000,  reward: 100 },
   { id: 'coins_20k',  name: 'Goldesel',        text: 'Verdiene insgesamt 20.000 Münzen',           metric: 'totalCoins',   target: 20000, reward: 500 },
   { id: 'garage_3',   name: 'Sammler',         text: 'Besitze 3 Autos',                            metric: 'owned',        target: 3,     reward: 150 },
-  { id: 'garage_all', name: 'Fuhrpark',        text: 'Besitze alle Autos',                         metric: 'owned',        target: CARS.length, reward: 1000 },
+  { id: 'garage_all', name: 'Fuhrpark',        text: 'Besitze alle kaufbaren Autos',               metric: 'ownedBuyable', target: CARS.filter((c) => !c.exclusive).length, reward: 1000 },
   { id: 'level_7',    name: 'Weltenbummler',   text: 'Erreiche Level 7',                           metric: 'bestLevel',    target: 7,     reward: 100 },
   { id: 'level_13',   name: 'Am Vulkan',       text: 'Erreiche Level 13',                          metric: 'bestLevel',    target: 13,    reward: 300, color: 'ice' },
   { id: 'streak_3',   name: 'Dranbleiber',     text: 'Fahre an 3 Tagen hintereinander',            metric: 'bestStreak',   target: 3,     reward: 60 },
@@ -353,6 +389,10 @@ export const ACHIEVEMENTS = [
 
 // Sonderlacke: gelten für alle Autos, sobald der Erfolg geschafft ist, der sie freischaltet.
 export const SPECIAL_COLORS = {
+  // Wochenpreise (siehe WEEKLY_PRIZES): freigeschaltet, sobald man den Pokal dazu besitzt
+  crown:  { name: 'Krone',        color: '#FFB300', trophy: 'gold' },
+  silver: { name: 'Chrom-Silber', color: '#D9DEE7', trophy: 'silver' },
+  bronze: { name: 'Bronze-Glut',  color: '#CD7F32', trophy: 'bronze' },
   gold: { name: 'Gold',      color: '#FFD24A' },
   pink: { name: 'Neon-Pink', color: '#FF2BD6' },
   ice:  { name: 'Eisblau',   color: '#9FE8FF' },

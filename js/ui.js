@@ -18,10 +18,10 @@
  */
 import {
   CARS, PERKS, EMOTES, WORLDS, CONFIG, MISSION_POOL, LEVELS_PER_WORLD, VERSION, DEFAULT_SETTINGS, SETTINGS_GROUPS,
-  SPECIAL_COLORS, STREAK, streakBonus, QUICK_CHAT,
+  SPECIAL_COLORS, STREAK, streakBonus, QUICK_CHAT, WEEKLY_ITEMS, WEEKLY_RESET, weeklyPrizeCoins,
 } from './config.js';
 import {
-  TEAL, MUTED, NF, NF1, num, clamp01, fmtInt, fmtDist, fmtLongDist, fmtTime, statFrac, changed, easeOut, isDigit, COLOR_RE, safeColor, UNSAFE_CHARS, cleanName, cleanText, nameError, carName, missionMode, mq, h, appendAll, animate, coinIcon, checker, chevrons, srOnly, ICONS, iconCache, icon, Digits, byDistanceDesc, FRAMES,
+  TEAL, MUTED, NF, NF1, num, clamp01, fmtInt, fmtDist, fmtLongDist, fmtTime, fmtCountdown, statFrac, changed, easeOut, isDigit, COLOR_RE, safeColor, UNSAFE_CHARS, cleanName, cleanText, nameError, carName, missionMode, mq, h, appendAll, animate, coinIcon, checker, chevrons, srOnly, ICONS, iconCache, icon, Digits, byDistanceDesc, FRAMES,
 } from './ui-kit.js';
 
 // ===========================================================================
@@ -41,8 +41,8 @@ const MODEL_LABEL = {
 const STAT_DEFS = [['speed', 'Tempo'], ['handling', 'Handling'], ['nitro', 'Nitro']];
 const NET_LABEL = { online: 'Online', connecting: 'Verbinde …', offline: 'Offline' };
 const LB_TABS = [
-  { kind: 'global', label: 'Allzeit' },
   { kind: 'weekly', label: 'Diese Woche' },
+  { kind: 'global', label: 'Allzeit' },
   { kind: 'daily', label: 'Heute' },
   { kind: 'friends', label: 'Freunde' },
   { kind: 'party', label: 'Party' },
@@ -94,7 +94,7 @@ export class UI {
    *   onSelectColor, onSubmitName, onRename, onLeaderboardTab, onCreateParty,
    *   onJoinParty, onLeaveParty, onStartRace, onCopyInvite, onShareInvite, onEmote, onChat,
    *   onFriendAdd, onFriendCopy, onFriendShare, onFriendRemove, onOpenFriends, onPartyFriend,
-   *   onOpenCampaign, onStartMap, onNextMap,
+   *   onOpenCampaign, onStartMap, onNextMap, onWeekInvite, onWeekShare, onWeekRewardClose,
    *   onSettingsChange, onPause, onResume, onPauseSettings, onRestart, onToMenu, onTouch, onUiSound
    */
   constructor({ root, callbacks } = {}) {
@@ -157,6 +157,7 @@ export class UI {
     this._buildTopBar();
     this._buildOverlays();
     this._buildPause();
+    this._buildWeekReward();
     this._buildNameDialog();
     this._buildFatal();
 
@@ -309,6 +310,8 @@ export class UI {
     const lb = this.lb;
     lb.friends.hidden = kind !== 'friends';
     lb.removable = kind === 'friends';
+    lb.week.hidden = kind !== 'weekly';
+    if (kind !== 'weekly') this._stopWeekTimer();
     const k = LB_TABS.some((t) => t.kind === kind) ? kind : 'global';
     for (const tab of lb.tabs) {
       const isParty = tab.kind === 'party';
@@ -342,8 +345,85 @@ export class UI {
     } else {
       lb.state.hidden = true;
       lb.list.hidden = false;
-      this._fillBoard(lb.list, data, meId, 100, lb.removable ? (id) => this._call('onFriendRemove', id) : null);
+      this._fillBoard(lb.list, data, meId, 100, lb.removable ? (id) => this._call('onFriendRemove', id) : null, { weekly: k === 'weekly' });
     }
+  }
+
+  /**
+   * Wochenwertung: Restzeit (läuft im Sekundentakt weiter), eigener Platz und was er einbringt.
+   * @param {{ endsAt: number, offset: number, rank: number, best: number, players: number, canShare: boolean }} info
+   */
+  renderWeek({ endsAt = 0, offset = 0, rank = 0, best = 0, players = 0, canShare = false } = {}) {
+    const lb = this.lb;
+    lb.weekEndsAt = num(endsAt);
+    lb.weekOffset = num(offset);
+    lb.weekShare.hidden = !canShare;
+    const tick = () => {
+      lb.weekCount.textContent = lb.weekEndsAt ? fmtCountdown(lb.weekEndsAt - (Date.now() + lb.weekOffset)) : '…';
+    };
+    tick();
+    this._stopWeekTimer();
+    this._weekTimer = setInterval(tick, 15000);
+    if (rank > 0 && best > 0) {
+      const coins = weeklyPrizeCoins(rank);
+      const item = rank <= 3 ? Object.values(WEEKLY_ITEMS).find((i) => i.rank === rank) : null;
+      lb.weekMe.textContent = `Du bist Platz ${rank} von ${players} (${fmtInt(best)} m) – wenn die Woche jetzt endet, bekommst du ${fmtInt(coins)} Münzen${item ? ` und ${item.name}` : ''}.`;
+    } else {
+      lb.weekMe.textContent = 'Fahr eine Runde, um dich zu platzieren – ab dem ersten Punkt bekommst du zum Wochenende mindestens 25 Münzen.';
+    }
+  }
+
+  _stopWeekTimer() {
+    clearInterval(this._weekTimer);
+    this._weekTimer = 0;
+  }
+
+  _buildWeekReward() {
+    const w = {};
+    w.list = h('div', { class: 'wr__list' });
+    w.total = h('p', { class: 'wr__total' });
+    w.ok = h('button', { type: 'button', class: 'btn btn--play', onClick: () => this._call('onWeekRewardClose') },
+      icon('check', 'btn__icon'), h('span', { class: 'btn__label' }, 'Einsammeln'));
+    w.el = h('div', { class: 'wr', hidden: true, role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'lr-wr-title' },
+      h('div', { class: 'wr__backdrop', 'aria-hidden': 'true' }),
+      h('div', { class: 'wr__card' },
+        h('h2', { class: 'wr__title', id: 'lr-wr-title' }, 'Wochenwertung beendet!'),
+        w.list, w.total, w.ok));
+    this.root.append(w.el);
+    this.wr = w;
+  }
+
+  /** Belohnungen einer abgeschlossenen Woche: [{ rank, score, coins, bonus, item, newCar }] */
+  showWeekRewards(items = []) {
+    const w = this.wr;
+    const list = Array.isArray(items) ? items.filter((i) => i && typeof i === 'object') : [];
+    if (!list.length) return;
+    w.list.textContent = '';
+    let total = 0;
+    for (const r of list) {
+      const item = WEEKLY_ITEMS[r.item] || null;
+      total += num(r.coins) + num(r.bonus);
+      w.list.append(h('div', { class: `wr__item${item ? ` wr__item--${r.item}` : ''}` },
+        h('span', { class: 'wr__medal', 'aria-hidden': 'true' }, item ? item.medal : '🏁'),
+        h('div', { class: 'wr__text' },
+          h('strong', null, `Platz ${fmtInt(r.rank)}${num(r.score) ? ` mit ${fmtInt(r.score)} m` : ''}`),
+          item ? h('span', { class: 'wr__prize' }, item.title + (r.newCar ? ` – neues Auto: ${item.name}!` : r.item === 'champion' ? ' – schon wieder!' : ` – Lack „${item.name}“ freigeschaltet`)) : null,
+          num(r.bonus) > 0 ? h('span', null, `Auto schon vorhanden: +${fmtInt(r.bonus)} Extra-Münzen`) : null),
+        h('span', { class: 'week__coins' }, coinIcon(), `+${fmtInt(num(r.coins) + num(r.bonus))}`)));
+    }
+    w.total.textContent = list.length > 1 ? `Zusammen ${fmtInt(total)} Münzen` : '';
+    w.el.hidden = false;
+    this.root.classList.add('is-modal');
+    this._setInert(true);
+    this._afterFrame(() => w.ok.focus({ preventScroll: true }));
+  }
+
+  hideWeekRewards() {
+    const w = this.wr;
+    if (w.el.hidden) return;
+    w.el.hidden = true;
+    this.root.classList.remove('is-modal');
+    this._setInert(false);
   }
 
   /** Freunde-Bereich der Rangliste: eigener Code und Rückmeldung zum letzten Hinzufügen. */
@@ -468,14 +548,35 @@ export class UI {
   }
 
   /** Modaler Namensdialog. Absenden → callbacks.onSubmitName(name); main schließt mit closeName(). */
-  askName({ initial = '', error = null, mode = 'first' } = {}) {
+  /** Zeigt im Namensdialog, wer eingeladen hat (nach dem Laden nachgereicht). */
+  setInviter(name) {
     const m = this.nm;
+    m.inviter = cleanName(name) || '';
+    if (m.mode === 'first' && !m.el.hidden) this._applyNameTexts();
+  }
+
+  _applyNameTexts() {
+    const m = this.nm;
+    if (m.mode === 'rename') {
+      m.title.textContent = 'Name ändern';
+      m.lead.textContent = 'So sehen dich die anderen in der Rangliste und in der Party.';
+    } else if (m.invited) {
+      m.title.textContent = 'Willkommen an Bord!';
+      m.lead.textContent = m.inviter
+        ? `${m.inviter} hat dich zur Wochen-Rangliste eingeladen. Such dir einen Namen aus – dann bist du sofort dabei und ihr seid Freunde.`
+        : 'Du wurdest zur Wochen-Rangliste eingeladen. Such dir einen Namen aus – dann bist du sofort dabei.';
+    } else {
+      m.title.textContent = 'Wie heißt du, Fahrer?';
+      m.lead.textContent = 'Dein Name erscheint in der Rangliste und bei deinen Freunden in der Party.';
+    }
+  }
+
+  askName({ initial = '', error = null, mode = 'first', invited = false } = {}) {
+    const m = this.nm;
+    m.invited = Boolean(invited);
     const wasOpen = !m.el.hidden;
     m.mode = mode === 'rename' ? 'rename' : 'first';
-    m.title.textContent = m.mode === 'rename' ? 'Name ändern' : 'Wie heißt du, Fahrer?';
-    m.lead.textContent = m.mode === 'rename'
-      ? 'So sehen dich die anderen in der Rangliste und in der Party.'
-      : 'Dein Name erscheint in der Rangliste und bei deinen Freunden in der Party.';
+    this._applyNameTexts();
     m.cancel.hidden = m.mode !== 'rename';
     m.submitLabel.textContent = m.mode === 'rename' ? 'Speichern' : 'Los geht’s';
     if (!wasOpen || !error) m.input.value = cleanName(typeof initial === 'string' ? initial : '', 16);
@@ -1411,7 +1512,7 @@ export class UI {
       return { btn, subEl };
     };
     const garage = navBtn('car', 'Garage', 'Autos & Lacke', 'onOpenGarage');
-    const board = navBtn('trophy', 'Rangliste', 'Weltweit & Woche', 'onOpenLeaderboard');
+    const board = navBtn('trophy', 'Rangliste', 'Wochenpreise · live', 'onOpenLeaderboard');
     const party = navBtn('users', 'Party', 'mit Freunden', 'onOpenParty', 'navbtn--party');
     const friends = navBtn('users', 'Freunde', 'Code & Rangliste', 'onOpenFriends', 'navbtn--friends');
     const campaign = navBtn('road', 'Kampagne', '20 Karten · Sterne · Stufen', 'onOpenCampaign', 'navbtn--campaign');
@@ -1619,7 +1720,7 @@ export class UI {
       color: def.color,
       btn: h('button', {
         type: 'button', class: 'swatch swatch--special is-locked', 'aria-pressed': 'false', disabled: true,
-        'aria-label': `Sonderlack ${def.name} (gesperrt)`, title: `${def.name} – wird durch einen Erfolg freigeschaltet`,
+        'aria-label': `Sonderlack ${def.name} (gesperrt)`, title: `${def.name} – wird durch einen Erfolg oder Wochenpreis freigeschaltet`,
         style: { '--c': safeColor(def.color) },
         onClick: () => this._call('onSelectColor', id, def.color),
       }, icon('lock', 'swatch__lock')),
@@ -1663,7 +1764,8 @@ export class UI {
     if (!card) return;
     const car = card.car;
     const price = Math.floor(num(car.price));
-    const locked = !owned && coins < price;
+    const exclusive = Boolean(car.exclusive);
+    const locked = !owned && (exclusive || coins < price);
     const key = `${owned}|${selected}|${preview}|${color}|${locked}|${activeCar ? activeCar.id : ''}|${locked ? coins : ''}|${extraColors.join(',')}`;
     if (key === card.key) return;
     card.key = key;
@@ -1675,8 +1777,8 @@ export class UI {
     li.classList.toggle('is-locked', locked);
     li.style.setProperty('--paint', safeColor(color, '#FF5A1F'));
     card.head.setAttribute('aria-pressed', preview ? 'true' : 'false');
-    card.statusText.textContent = selected ? 'Aktiv' : owned ? 'Besitzt' : fmtInt(price);
-    card.statusCoin.hidden = owned;
+    card.statusText.textContent = selected ? 'Aktiv' : owned ? 'Besitzt' : exclusive ? 'Wochenpreis' : fmtInt(price);
+    card.statusCoin.hidden = owned || exclusive;
 
     card.colorsEl.hidden = !owned;
     for (const s of card.swatches) s.btn.setAttribute('aria-pressed', s.color === color ? 'true' : 'false');
@@ -1686,15 +1788,15 @@ export class UI {
       s.btn.classList.toggle('is-locked', !open);
       s.btn.setAttribute('aria-pressed', open && s.color === color ? 'true' : 'false');
       s.btn.setAttribute('aria-label', open ? `Sonderlack ${s.name}` : `Sonderlack ${s.name} (gesperrt)`);
-      s.btn.title = open ? s.name : `${s.name} – wird durch einen Erfolg freigeschaltet`;
+      s.btn.title = open ? s.name : `${s.name} – wird durch einen Erfolg oder Wochenpreis freigeschaltet`;
     }
 
-    card.buy.hidden = owned;
+    card.buy.hidden = owned || exclusive;
     card.buy.classList.toggle('is-locked', locked);
     card.select.hidden = !owned || selected;
     card.activeTag.hidden = !selected;
     card.hint.hidden = !locked;
-    if (locked) card.hint.textContent = `Dir fehlen noch ${fmtInt(price - coins)} Münzen.`;
+    if (locked) card.hint.textContent = exclusive ? `Nur als Sieger der Wochenwertung (Platz 1, ${WEEKLY_RESET}).` : `Dir fehlen noch ${fmtInt(price - coins)} Münzen.`;
 
     // Markierung: Wert des aktuell gefahrenen Autos zum Vergleich
     for (const s of card.stats) {
@@ -1801,7 +1903,25 @@ export class UI {
       h('p', { class: 'friends__lead' }, 'Tausche Codes mit deinen Freunden: Wer deinen Code eingibt oder deinen Link öffnet, ist mit dir verbunden – ihr seht gegenseitig Namen und Rekorde.'),
       h('div', { class: 'friends__me' }, h('span', { class: 'friends__label' }, 'Dein Code'), lb.friendCode, lb.friendCopy, lb.friendShare),
       friendForm, lb.friendMsg);
-    lb.panel = h('div', { class: 'sheet__body lb', id: 'lr-lb-panel', role: 'tabpanel' }, lb.friends, lb.state, lb.list);
+    // Wochenwertung: Restzeit, Preise, eigener Platz, Einladung
+    lb.weekCount = h('strong', { class: 'week__count' }, '…');
+    lb.weekMe = h('p', { class: 'week__me' });
+    lb.weekPrizes = h('ul', { class: 'week__prizes' }, Object.entries(WEEKLY_ITEMS).map(([key, it]) => h('li', { class: `week__prize week__prize--${key}` },
+      h('span', { class: 'week__medal', 'aria-hidden': 'true' }, it.medal),
+      h('span', { class: 'week__prize-text' }, h('strong', null, `Platz ${it.rank}: ${it.title}`), h('span', null, it.text)),
+      h('span', { class: 'week__coins' }, coinIcon(), fmtInt(weeklyPrizeCoins(it.rank))))));
+    lb.weekInvite = h('button', { type: 'button', class: 'btn btn--primary btn--sm', onClick: () => this._call('onWeekInvite') },
+      icon('copy'), h('span', { class: 'btn__label' }, 'Freunde einladen (Link kopieren)'));
+    lb.weekShare = h('button', { type: 'button', class: 'btn btn--ghost btn--sm', onClick: () => this._call('onWeekShare') },
+      icon('share'), h('span', { class: 'btn__label' }, 'Teilen'));
+    lb.week = h('section', { class: 'week', hidden: true, 'aria-label': 'Wochenwertung' },
+      h('div', { class: 'week__head' }, h('span', { class: 'week__label' }, 'Wertung endet in'), lb.weekCount,
+        h('span', { class: 'week__reset' }, `Neustart jeden ${WEEKLY_RESET}`), h('span', { class: 'week__live' }, h('i', null), 'Live')),
+      lb.weekPrizes,
+      h('p', { class: 'week__more' }, 'Platz 4: 500 · 5: 400 · 6: 320 · 7: 260 · 8: 210 · 9: 170 · 10: 140 · 11–15: 100 · 16–25: 70 · 26–50: 40 · danach 25 Münzen für jeden mit Punkten.'),
+      lb.weekMe,
+      h('div', { class: 'week__invite' }, lb.weekInvite, lb.weekShare));
+    lb.panel = h('div', { class: 'sheet__body lb', id: 'lr-lb-panel', role: 'tabpanel' }, lb.week, lb.friends, lb.state, lb.list);
     this._sheet('leaderboard', { kicker: 'Bestenliste', title: 'Rangliste', cls: 'sheet--board' }, tablist, lb.panel);
     this.lb = lb;
   }
@@ -1815,9 +1935,9 @@ export class UI {
   }
 
   /** Ranglistenzeilen (Allzeit, Woche, Party). Baut nur neu, wenn sich die Daten geändert haben. */
-  _fillBoard(list, rows, meId, max, onRemove = null) {
+  _fillBoard(list, rows, meId, max, onRemove = null, opts = {}) {
     const data = rows.filter((r) => r && typeof r === 'object').slice(0, max);
-    const sig = `${meId}#${onRemove ? 'r' : ''}#${data.map((r) => `${r.player_id ?? r.id}:${r.name}:${r.best ?? r.score}:${r.car}:${r.color}:${r.runs}:${r.rank}`).join('|')}`;
+    const sig = `${meId}#${onRemove ? 'r' : ''}${opts.weekly ? 'w' : ''}#${data.map((r) => `${r.player_id ?? r.id}:${r.name}:${r.best ?? r.score}:${r.car}:${r.color}:${r.runs}:${r.rank}:${r.wins ?? ''}`).join('|')}`;
     if (list._sig === sig) return;
     list._sig = sig;
     list.textContent = '';
@@ -1833,10 +1953,12 @@ export class UI {
       h('span', { class: 'lb-row__rank' }, String(rank)),
       h('i', { class: 'lb-row__dot', 'aria-hidden': 'true' }),
       h('span', { class: 'lb-row__who' },
-        h('span', { class: 'lb-row__name' }, h('span', { class: 'lb-row__nametext' }, cleanName(row.name) || 'Unbekannt'), me ? h('span', { class: 'tag tag--me' }, 'Du') : null),
+        h('span', { class: 'lb-row__name' }, h('span', { class: 'lb-row__nametext' }, cleanName(row.name) || 'Unbekannt'), me ? h('span', { class: 'tag tag--me' }, 'Du') : null,
+          num(row.wins) > 0 ? h('span', { class: 'tag tag--gold', title: 'Wochensiege' }, `🏆 ${fmtInt(row.wins)}`) : null),
         h('span', { class: 'lb-row__car' }, carName(row.car) || '—')),
       runs != null ? h('span', { class: 'lb-row__runs' }, `${fmtInt(runs)} ${runs === 1 ? 'Fahrt' : 'Fahrten'}`) : null,
       h('span', { class: 'lb-row__best' }, fmtInt(row.best ?? row.score), h('span', { class: 'lb-row__unit' }, 'm')),
+      opts.weekly && num(row.best ?? row.score) > 0 ? h('span', { class: 'lb-row__prize', title: 'Preis, wenn die Woche jetzt endet' }, coinIcon(), fmtInt(weeklyPrizeCoins(rank))) : null,
       onRemove && !me ? h('button', {
         type: 'button', class: 'lb-row__remove', title: 'Freund entfernen', 'aria-label': `${cleanName(row.name) || 'Freund'} entfernen`,
         onClick: () => onRemove(id),

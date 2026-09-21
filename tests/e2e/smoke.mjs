@@ -159,7 +159,7 @@ try {
     await page.waitForFunction((n) => window.laneRacer.app.screen === n, name, { timeout: 5000 }).catch(() => {});
     check((await screen()) === name, `${label}-Bildschirm sichtbar`);
     if (name === 'missions') check(await page.evaluate(() => document.querySelectorAll('.ach').length >= 15), 'Erfolgsliste gefüllt');
-    if (name === 'garage') check(await page.evaluate(() => document.querySelectorAll('.car').length === 8), '8 Autos in der Garage');
+    if (name === 'garage') check(await page.evaluate(() => document.querySelectorAll('.car').length === 9), '9 Autos in der Garage (8 kaufbar + Wochenpreis)');
     if (name === 'leaderboard') check(await page.evaluate(() => [...document.querySelectorAll('.tab')].map((t) => t.textContent.trim()).includes('Freunde')), 'Tab "Freunde" vorhanden');
   }
 

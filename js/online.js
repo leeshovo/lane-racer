@@ -329,7 +329,8 @@ export function normalizeFriendCode(value) {
 export function friendCodeFromUrl() {
   try {
     if (typeof location === 'undefined') return null;
-    const raw = new URLSearchParams(location.search).get('friend');
+    const params = new URLSearchParams(location.search);
+    const raw = params.get('join') || params.get('friend'); // ?join= ist der Einladungslink, ?friend= die ältere Form
     return raw ? normalizeFriendCode(raw) : null;
   } catch {
     return null;
@@ -340,9 +341,9 @@ export function friendCodeFromUrl() {
 export function friendShareUrl(code) {
   const c = normalizeFriendCode(code) || '';
   try {
-    return location.origin + location.pathname + '?friend=' + c;
+    return location.origin + location.pathname + '?join=' + c;
   } catch {
-    return '?friend=' + c;
+    return '?join=' + c;
   }
 }
 
@@ -587,7 +588,7 @@ export class Online {
       const pLimit = toInt(limit, 1, 200, LEADERBOARD_LIMIT);
       let res;
       if (kind === 'global') res = await this._rpc('leaderboard_global', { p_limit: pLimit });
-      else if (kind === 'weekly') res = await this._rpc('leaderboard_weekly', { p_limit: pLimit });
+      else if (kind === 'weekly') res = await this._rpc('leaderboard_week', { p_limit: pLimit });
       else if (kind === 'daily') {
         const day = typeof partyCode === 'string' && RE_DAY.test(partyCode) ? partyCode : dailyKey();
         res = await this._rpc('leaderboard_daily', { p_day: day, p_limit: pLimit });
@@ -602,6 +603,89 @@ export class Online {
       return { rows: sanitizeBoardRows(res.data, pLimit) };
     } catch (err) {
       return unexpected(err);
+    }
+  }
+
+  /**
+   * Aktuelle Wochenwertung: wann sie endet (Server-Uhr, damit falsch gehende Uhren nichts verfälschen).
+   * @returns {Promise<{ startsAt: number, endsAt: number, offset: number } | { error, code }>} offset = Serverzeit − lokale Zeit in ms
+   */
+  async weekInfo() {
+    try {
+      const res = await this._rpc('week_info', {});
+      if (res.error) return res;
+      const row = firstRow(res.data);
+      const startsAt = row ? Date.parse(row.week_start) : NaN;
+      const endsAt = row ? Date.parse(row.ends_at) : NaN;
+      const serverNow = row ? Date.parse(row.server_now) : NaN;
+      if (![startsAt, endsAt, serverNow].every(Number.isFinite)) return failure('server', MSG.badResponse);
+      return { startsAt, endsAt, offset: serverNow - Date.now() };
+    } catch (err) {
+      return unexpected(err);
+    }
+  }
+
+  /** Meldet den Spieler für die laufende Woche an (steht dann mit 0 m in der Wertung). */
+  async joinWeek(identity) {
+    try {
+      if (!validIdentity(identity)) return failure('auth', MSG.noIdentity);
+      const res = await this._rpc('join_week', { p_player: identity.id, p_secret: identity.secret });
+      return res.error ? res : { ok: true };
+    } catch (err) {
+      return unexpected(err);
+    }
+  }
+
+  /**
+   * Belohnungen abgeschlossener Wochen (bleiben auf dem Server, bis sie mit ackRewards bestätigt sind).
+   * @returns {Promise<{ rewards: Array<{ week, rank, score, coins, item }> } | { error, code }>}
+   */
+  async claimRewards(identity) {
+    try {
+      if (!validIdentity(identity)) return failure('auth', MSG.noIdentity);
+      const res = await this._rpc('claim_rewards', { p_player: identity.id, p_secret: identity.secret });
+      if (res.error) return res;
+      const rewards = [];
+      for (const r of Array.isArray(res.data) ? res.data.slice(0, 20) : []) {
+        if (!isObj(r) || typeof r.week_start !== 'string' || !Number.isFinite(Date.parse(r.week_start))) continue;
+        rewards.push({
+          week: r.week_start,
+          rank: toInt(r.rank, 1, 100000, 1),
+          score: toInt(r.score, 0, MAX_DISTANCE, 0),
+          coins: toInt(r.coins, 0, 5000, 0),
+          item: r.item === 'champion' || r.item === 'silver' || r.item === 'bronze' ? r.item : null,
+        });
+      }
+      return { rewards };
+    } catch (err) {
+      return unexpected(err);
+    }
+  }
+
+  /** Bestätigt, dass die Belohnungen gutgeschrieben sind (danach liefert der Server sie nicht mehr). */
+  async ackRewards(identity, weeks) {
+    try {
+      if (!validIdentity(identity)) return failure('auth', MSG.noIdentity);
+      const list = (Array.isArray(weeks) ? weeks : []).filter((w) => typeof w === 'string' && Number.isFinite(Date.parse(w))).slice(0, 20);
+      if (!list.length) return { ok: true };
+      const res = await this._rpc('ack_rewards', { p_player: identity.id, p_secret: identity.secret, p_weeks: list });
+      return res.error ? res : { ok: true };
+    } catch (err) {
+      return unexpected(err);
+    }
+  }
+
+  /** Name des Einladenden zu einem Einladungscode (oder null). */
+  async inviteInfo(code) {
+    try {
+      const c = normalizeFriendCode(code);
+      if (!c) return { name: null };
+      const res = await this._rpc('invite_info', { p_code: c });
+      if (res.error) return { name: null };
+      const row = firstRow(res.data);
+      return { name: row ? cleanName(row.name) || null : null };
+    } catch {
+      return { name: null };
     }
   }
 
@@ -945,6 +1029,7 @@ function sanitizeBoardRows(data, limit) {
       color: cleanColor(r.color),
       best: toInt(r.best, 0, MAX_DISTANCE, 0),
       runs: toInt(r.runs, 0, MAX_RUNS, 0),
+      wins: toInt(r.wins, 0, 9999, 0), // Wochensiege (nur die Wochenwertung liefert das)
     });
   }
   rows.sort((a, b) => b.best - a.best); // stabil: Server-Reihenfolge bei Gleichstand bleibt
