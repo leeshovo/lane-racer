@@ -18,7 +18,7 @@
  *  - supabase-js wird erst bei Bedarf per dynamischem import() geladen (Import-Map),
  *    damit das Spiel auch ohne Internet bzw. ohne CDN startet.
  */
-import { CARS, EMOTES } from './config.js';
+import { CARS, EMOTES, QUICK_CHAT } from './config.js';
 
 // ---------------------------------------------------------------------------
 // Konstanten
@@ -65,6 +65,7 @@ const RE_PARTY = /^[A-Z0-9]{4,8}$/;
 const RE_RACE = /^[A-Za-z0-9_-]{4,40}$/;
 const RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RE_DAY = /^[0-9]{8}$/;
+const RE_FRIEND = /^[A-HJ-NP-Z2-9]{6}$/; // ohne I und O (verwechselbar mit 1 und 0)
 const RE_COLOR = /^#[0-9a-fA-F]{6}$/;
 const RE_ID = /^[A-Za-z0-9_-]{4,64}$/; // UUID aus der Datenbank oder lokale Gast-ID
 
@@ -315,6 +316,33 @@ export function partyCodeFromUrl() {
     return raw ? normalizePartyCode(raw) : null;
   } catch {
     return null;
+  }
+}
+
+/** Freundescode aus Text ("abc-234 x" → "ABC234") oder null, wenn er nicht gültig aussieht. */
+export function normalizeFriendCode(value) {
+  const c = String(value ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return RE_FRIEND.test(c) ? c : null;
+}
+
+/** ?friend=CODE aus dem Einladungslink. */
+export function friendCodeFromUrl() {
+  try {
+    if (typeof location === 'undefined') return null;
+    const raw = new URLSearchParams(location.search).get('friend');
+    return raw ? normalizeFriendCode(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Link zum Teilen: aktuelle Seite + ?friend=CODE. */
+export function friendShareUrl(code) {
+  const c = normalizeFriendCode(code) || '';
+  try {
+    return location.origin + location.pathname + '?friend=' + c;
+  } catch {
+    return '?friend=' + c;
   }
 }
 
@@ -572,6 +600,69 @@ export class Online {
       }
       if (res.error) return res;
       return { rows: sanitizeBoardRows(res.data, pLimit) };
+    } catch (err) {
+      return unexpected(err);
+    }
+  }
+
+  /**
+   * Eigener Freundescode (wird beim ersten Mal auf dem Server erzeugt).
+   * @returns {Promise<{ code: string } | { error: string, code: string }>}
+   */
+  async friendCode(identity) {
+    try {
+      if (!validIdentity(identity)) return failure('auth', MSG.noIdentity);
+      const res = await this._rpc('my_friend_code', { p_player: identity.id, p_secret: identity.secret });
+      if (res.error) return res;
+      const code = normalizeFriendCode(res.data);
+      return code ? { code } : failure('server', MSG.badResponse);
+    } catch (err) {
+      return unexpected(err);
+    }
+  }
+
+  /**
+   * Freund per Code hinzufügen (gegenseitig).
+   * @returns {Promise<{ friend: { id: string, name: string } } | { error: string, code: string }>}
+   */
+  async addFriend(identity, friendCode) {
+    try {
+      if (!validIdentity(identity)) return failure('auth', MSG.noIdentity);
+      const code = normalizeFriendCode(friendCode);
+      if (!code) return failure('invalid', 'Das ist kein gültiger Freundescode (6 Zeichen, z. B. K7M2QX).');
+      const res = await this._rpc('add_friend', { p_player: identity.id, p_secret: identity.secret, p_code: code });
+      if (res.error) return res;
+      const row = firstRow(res.data);
+      const id = row ? cleanId(row.friend_id) : null;
+      return id ? { friend: { id, name: cleanName(row.name) } } : failure('server', MSG.badResponse);
+    } catch (err) {
+      return unexpected(err);
+    }
+  }
+
+  /** Freund entfernen (bei beiden). */
+  async removeFriend(identity, friendId) {
+    try {
+      if (!validIdentity(identity)) return failure('auth', MSG.noIdentity);
+      const id = typeof friendId === 'string' && RE_UUID.test(friendId) ? friendId : null;
+      if (!id) return failure('invalid');
+      const res = await this._rpc('remove_friend', { p_player: identity.id, p_secret: identity.secret, p_friend: id });
+      return res.error ? res : { ok: true };
+    } catch (err) {
+      return unexpected(err);
+    }
+  }
+
+  /**
+   * Rangliste unter Freunden (du selbst bist dabei).
+   * @returns {Promise<{ rows: Array<{ rank, player_id, id, name, car, color, best, runs }> } | { error, code }>}
+   */
+  async friendsBoard(identity) {
+    try {
+      if (!validIdentity(identity)) return failure('auth', MSG.noIdentity);
+      const res = await this._rpc('leaderboard_friends', { p_player: identity.id, p_secret: identity.secret });
+      if (res.error) return res;
+      return { rows: sanitizeBoardRows(res.data, 60) };
     } catch (err) {
       return unexpected(err);
     }
@@ -952,9 +1043,9 @@ function sanitizePresence(key, raw) {
  * Eine Party. Wird nur von Online.joinParty() erzeugt.
  *
  * Öffentliche Felder: code, shareUrl
- * Events (on): 'members' | 'state' | 'race' | 'raceEnd' | 'emote' | 'status'
+ * Events (on): 'members' | 'state' | 'race' | 'raceEnd' | 'emote' | 'chat' | 'status'
  */
-class Party {
+export class Party {
   constructor(online, client, code, me) {
     this.code = code;
     this.shareUrl = partyShareUrl(code);
@@ -1186,6 +1277,28 @@ class Party {
     }
   }
 
+  /**
+   * Schnellnachricht (nur feste Sätze aus QUICK_CHAT, kein freier Text). Feuert auch lokal ('chat' mit isMe: true).
+   * Es wird nur die ID gesendet; den Text schlägt jeder Empfänger selbst nach.
+   * @returns {boolean} false bei unbekannter Nachricht oder zu schnellem Wiederholen
+   */
+  sendChat(chatId) {
+    try {
+      const entry = QUICK_CHAT.find((c) => c.id === chatId);
+      if (this._leaving || !entry) return false;
+      const t = now();
+      if (t - this._lastEmoteAt < EMOTE_COOLDOWN_MS) return false;
+      this._lastEmoteAt = t;
+      const me = this._me;
+      this._broadcast('chat', { id: me.id, chat: entry.id });
+      this._events.emit('chat', { id: me.id, chatId: entry.id, text: entry.text, name: me.name, color: me.color, isMe: true });
+      return true;
+    } catch (err) {
+      console.warn('[online] sendChat:', err);
+      return false;
+    }
+  }
+
   /** Party verlassen: Kanal abmelden, Timer stoppen, 'status' → 'left'. Mehrfachaufruf ist ok. */
   leave() {
     if (this._leavePromise) return this._leavePromise;
@@ -1284,7 +1397,8 @@ class Party {
         .on('broadcast', { event: 'pos' }, guard((msg) => this._handlePos(msg?.payload)))
         .on('broadcast', { event: 'race' }, guard((msg) => this._handleRace(msg?.payload)))
         .on('broadcast', { event: 'raceEnd' }, guard((msg) => this._handleRaceEnd(msg?.payload)))
-        .on('broadcast', { event: 'emote' }, guard((msg) => this._handleEmote(msg?.payload)));
+        .on('broadcast', { event: 'emote' }, guard((msg) => this._handleEmote(msg?.payload)))
+        .on('broadcast', { event: 'chat' }, guard((msg) => this._handleChat(msg?.payload)));
       this._channel = channel;
       channel.subscribe(guard((status) => this._handleChannelStatus(status)));
     } catch (err) {
@@ -1586,6 +1700,20 @@ class Party {
     if (t - meta.lastEmoteAt < EMOTE_FLOOD_MS) return;
     meta.lastEmoteAt = t;
     this._events.emit('emote', { id, emoji: p.emoji, name: m.name, color: m.color, isMe: false });
+  }
+
+  _handleChat(p) {
+    if (!isObj(p)) return;
+    const id = cleanId(p.id);
+    const entry = typeof p.chat === 'string' ? QUICK_CHAT.find((c) => c.id === p.chat) : null;
+    if (!id || id === this._me.id || !entry) return;
+    const m = this._others.get(id);
+    const meta = this._meta.get(id);
+    if (!m || !meta) return;
+    const t = now();
+    if (t - meta.lastEmoteAt < EMOTE_FLOOD_MS) return;
+    meta.lastEmoteAt = t;
+    this._events.emit('chat', { id, chatId: entry.id, text: entry.text, name: m.name, color: m.color, isMe: false });
   }
 
   /** Renn-IDs dieser Party haben die Form CODE-zeitstempel. */

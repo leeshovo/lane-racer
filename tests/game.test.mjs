@@ -369,3 +369,20 @@ describe('Verkehrskatalog', () => {
     assert.equal(boss.size[2], 15);
   });
 });
+
+// Diese Regeln prüft der Server in submit_score – ehrliche Runden dürfen nie daran scheitern.
+describe('Serverprüfung: ehrliche Runden bleiben plausibel', () => {
+  it('Überholte und gerammte Autos sowie Level passen zu Strecke und Zeit (Bot, 12 Runden)', () => {
+    for (let i = 0; i < 12; i++) {
+      let result = null;
+      const game = makeGame({ onOver: (r) => { result = r; } });
+      game.start({ seed: `plaus-${i}`, countdown: 0.01 });
+      run(game, 150, () => bot(game));
+      if (!result) result = game.hud() && { distance: game.distance, overtakes: game.overtakes, smashed: game.smashed, level: game.level, duration: game.elapsed };
+      const activity = result.overtakes + result.smashed;
+      assert.ok(activity >= (result.distance - 500) / 90, `Runde ${i}: ${activity} Autos bei ${Math.floor(result.distance)} m`);
+      assert.ok(result.level <= Math.min(15, 2 + Math.floor(result.duration / 12)), `Runde ${i}: Level ${result.level} nach ${result.duration.toFixed(0)} s`);
+      assert.ok(result.distance <= (25 * result.duration + (47 / 360) * result.duration ** 2) * 2.4 + 100, `Runde ${i}: Strecke`);
+    }
+  });
+});

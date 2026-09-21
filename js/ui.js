@@ -18,7 +18,7 @@
  */
 import {
   CARS, PERKS, EMOTES, WORLDS, CONFIG, MISSION_POOL, LEVELS_PER_WORLD, VERSION, DEFAULT_SETTINGS, SETTINGS_GROUPS,
-  SPECIAL_COLORS, STREAK, streakBonus,
+  SPECIAL_COLORS, STREAK, streakBonus, QUICK_CHAT,
 } from './config.js';
 
 // ===========================================================================
@@ -40,6 +40,7 @@ const LB_TABS = [
   { kind: 'global', label: 'Allzeit' },
   { kind: 'weekly', label: 'Diese Woche' },
   { kind: 'daily', label: 'Heute' },
+  { kind: 'friends', label: 'Freunde' },
   { kind: 'party', label: 'Party' },
 ];
 // [Schlüssel in coins.breakdown, Beschriftung, immer anzeigen?]
@@ -325,7 +326,8 @@ export class UI {
    *   callbacks: alle optional – onPlay, onOpenGarage, onOpenLeaderboard, onOpenParty,
    *   onOpenMissions, onOpenSettings, onBack, onPreviewCar, onBuyCar, onSelectCar,
    *   onSelectColor, onSubmitName, onRename, onLeaderboardTab, onCreateParty,
-   *   onJoinParty, onLeaveParty, onStartRace, onCopyInvite, onShareInvite, onEmote,
+   *   onJoinParty, onLeaveParty, onStartRace, onCopyInvite, onShareInvite, onEmote, onChat,
+   *   onFriendAdd, onFriendCopy, onFriendShare, onFriendRemove,
    *   onSettingsChange, onPause, onResume, onRestart, onToMenu, onTouch, onUiSound
    */
   constructor({ root, callbacks } = {}) {
@@ -536,6 +538,8 @@ export class UI {
   /** Rangliste mit Tabs, Lade-Skelett, Fehler- und Leerzustand. */
   renderLeaderboard({ kind = 'global', rows = [], meId = null, loading = false, error = null, partyCode = null } = {}) {
     const lb = this.lb;
+    lb.friends.hidden = kind !== 'friends';
+    lb.removable = kind === 'friends';
     const k = LB_TABS.some((t) => t.kind === kind) ? kind : 'global';
     for (const tab of lb.tabs) {
       const isParty = tab.kind === 'party';
@@ -569,8 +573,23 @@ export class UI {
     } else {
       lb.state.hidden = true;
       lb.list.hidden = false;
-      this._fillBoard(lb.list, data, meId, 100);
+      this._fillBoard(lb.list, data, meId, 100, lb.removable ? (id) => this._call('onFriendRemove', id) : null);
     }
+  }
+
+  /** Freunde-Bereich der Rangliste: eigener Code und Rückmeldung zum letzten Hinzufügen. */
+  renderFriends({ code = '', canShare = false, message, error = false, busy = false, clearInput = false } = {}) {
+    const lb = this.lb;
+    lb.friendCode.textContent = /^[A-Z0-9]{6}$/.test(code) ? code : '——';
+    lb.friendCopy.disabled = !code;
+    lb.friendShare.disabled = !code;
+    lb.friendShare.hidden = !(canShare || this.canShare);
+    lb.friendAdd.disabled = Boolean(busy);
+    if (message !== undefined) {
+      lb.friendMsg.textContent = cleanText(message, 160);
+      lb.friendMsg.classList.toggle('is-error', Boolean(error));
+    }
+    if (clearInput) lb.friendInput.value = '';
   }
 
   /** Party-Bildschirm: Erstellen/Beitreten, Lobby mit Mitgliedern, Rennen, Emotes, Party-Rangliste. */
@@ -1078,6 +1097,18 @@ export class UI {
     this.emoteBox.append(bubble);
     while (this.emoteBox.children.length > 6) this.emoteBox.firstElementChild.remove();
     setTimeout(() => bubble.remove(), this.reducedMotion ? 2200 : 2800);
+  }
+
+  /** Schnellnachricht eines Mitspielers als Sprechblase (Text kommt aus QUICK_CHAT, nicht aus dem Netz). */
+  showChat({ name = '', color = TEAL, text = '' } = {}) {
+    const t = typeof text === 'string' ? text : '';
+    if (!t || t.length > 40) return;
+    const bubble = h('div', { class: 'emote-pop emote-pop--text', style: { '--c': safeColor(color, TEAL), '--x': `${Math.round(Math.random() * 24 - 12)}px` } },
+      h('span', { class: 'emote-pop__emoji' }, t),
+      h('span', { class: 'emote-pop__name' }, cleanName(name) || 'Jemand'));
+    this.emoteBox.append(bubble);
+    while (this.emoteBox.children.length > 6) this.emoteBox.firstElementChild.remove();
+    setTimeout(() => bubble.remove(), this.reducedMotion ? 3200 : 3800);
   }
 
   /** Touch-Steuerung während der Fahrt ein-/ausblenden. */
@@ -1917,7 +1948,30 @@ export class UI {
     });
     lb.state = h('div', { class: 'lb__state' });
     lb.list = h('ol', { class: 'board', hidden: true });
-    lb.panel = h('div', { class: 'sheet__body lb', id: 'lr-lb-panel', role: 'tabpanel' }, lb.state, lb.list);
+
+    // Freunde: eigener Code, Link teilen, Code eingeben
+    lb.friendCode = h('strong', { class: 'friends__code' }, '——');
+    lb.friendCopy = h('button', { type: 'button', class: 'btn btn--ghost btn--sm', onClick: () => this._call('onFriendCopy') },
+      icon('copy'), h('span', { class: 'btn__label' }, 'Link kopieren'));
+    lb.friendShare = h('button', { type: 'button', class: 'btn btn--ghost btn--sm', onClick: () => this._call('onFriendShare') },
+      icon('share'), h('span', { class: 'btn__label' }, 'Teilen'));
+    lb.friendInput = h('input', {
+      id: 'lr-friend-input', class: 'field__input field__input--code field__input--small', type: 'text', maxlength: '12',
+      spellcheck: 'false', autocomplete: 'off', autocapitalize: 'characters', placeholder: 'Code deines Freundes', 'aria-label': 'Freundescode eingeben',
+    });
+    lb.friendAdd = h('button', { type: 'submit', class: 'btn btn--primary btn--sm' },
+      icon('users'), h('span', { class: 'btn__label' }, 'Hinzufügen'));
+    lb.friendMsg = h('p', { class: 'setting__desc friends__msg', role: 'status' });
+    const friendForm = h('form', { class: 'friends__form', autocomplete: 'off' }, lb.friendInput, lb.friendAdd);
+    friendForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      this._call('onFriendAdd', lb.friendInput.value);
+    });
+    lb.friends = h('section', { class: 'friends', hidden: true, 'aria-label': 'Freunde' },
+      h('p', { class: 'friends__lead' }, 'Tausche Codes mit deinen Freunden: Wer deinen Code eingibt oder deinen Link öffnet, ist mit dir verbunden – ihr seht gegenseitig Namen und Rekorde.'),
+      h('div', { class: 'friends__me' }, h('span', { class: 'friends__label' }, 'Dein Code'), lb.friendCode, lb.friendCopy, lb.friendShare),
+      friendForm, lb.friendMsg);
+    lb.panel = h('div', { class: 'sheet__body lb', id: 'lr-lb-panel', role: 'tabpanel' }, lb.friends, lb.state, lb.list);
     this._sheet('leaderboard', { kicker: 'Bestenliste', title: 'Rangliste', cls: 'sheet--board' }, tablist, lb.panel);
     this.lb = lb;
   }
@@ -1931,9 +1985,9 @@ export class UI {
   }
 
   /** Ranglistenzeilen (Allzeit, Woche, Party). Baut nur neu, wenn sich die Daten geändert haben. */
-  _fillBoard(list, rows, meId, max) {
+  _fillBoard(list, rows, meId, max, onRemove = null) {
     const data = rows.filter((r) => r && typeof r === 'object').slice(0, max);
-    const sig = `${meId}#${data.map((r) => `${r.player_id ?? r.id}:${r.name}:${r.best ?? r.score}:${r.car}:${r.color}:${r.runs}:${r.rank}`).join('|')}`;
+    const sig = `${meId}#${onRemove ? 'r' : ''}#${data.map((r) => `${r.player_id ?? r.id}:${r.name}:${r.best ?? r.score}:${r.car}:${r.color}:${r.runs}:${r.rank}`).join('|')}`;
     if (list._sig === sig) return;
     list._sig = sig;
     list.textContent = '';
@@ -1952,7 +2006,11 @@ export class UI {
         h('span', { class: 'lb-row__name' }, h('span', { class: 'lb-row__nametext' }, cleanName(row.name) || 'Unbekannt'), me ? h('span', { class: 'tag tag--me' }, 'Du') : null),
         h('span', { class: 'lb-row__car' }, carName(row.car) || '—')),
       runs != null ? h('span', { class: 'lb-row__runs' }, `${fmtInt(runs)} ${runs === 1 ? 'Fahrt' : 'Fahrten'}`) : null,
-      h('span', { class: 'lb-row__best' }, fmtInt(row.best ?? row.score), h('span', { class: 'lb-row__unit' }, 'm'))));
+      h('span', { class: 'lb-row__best' }, fmtInt(row.best ?? row.score), h('span', { class: 'lb-row__unit' }, 'm')),
+      onRemove && !me ? h('button', {
+        type: 'button', class: 'lb-row__remove', title: 'Freund entfernen', 'aria-label': `${cleanName(row.name) || 'Freund'} entfernen`,
+        onClick: () => onRemove(id),
+      }, icon('close')) : null));
     });
   }
 
@@ -2057,8 +2115,9 @@ export class UI {
       p.memberList);
 
     const emotesBox = h('section', { class: 'party-emotes', 'aria-labelledby': 'lr-party-emotes' },
-      h('h3', { class: 'section-title', id: 'lr-party-emotes' }, 'Emotes'),
-      h('div', { class: 'emote-row' }, EMOTES.map((e) => this._emoteButton(e, false))));
+      h('h3', { class: 'section-title', id: 'lr-party-emotes' }, 'Emotes und Sprüche'),
+      h('div', { class: 'emote-row' }, EMOTES.map((e) => this._emoteButton(e, false))),
+      h('div', { class: 'chat-row' }, QUICK_CHAT.map((c) => this._chatButton(c))));
 
     p.board = h('ol', { class: 'board board--compact', hidden: true });
     p.boardEmpty = h('p', { class: 'muted-note' }, 'Noch keine Party-Ergebnisse – startet ein Rennen!');
@@ -2100,7 +2159,16 @@ export class UI {
     return btn;
   }
 
-  _sendEmote(emoji) {
+  _chatButton(entry) {
+    const btn = h('button', {
+      type: 'button', class: 'chat-chip', 'data-sfx': 'none', title: 'Schnellnachricht senden',
+    }, entry.text);
+    btn.addEventListener('click', () => this._sendEmote(entry.id, 'onChat'));
+    this._emoteBtns.push(btn);
+    return btn;
+  }
+
+  _sendEmote(emoji, callback = 'onEmote') {
     const now = performance.now();
     if (now < this._emoteReadyAt) return;
     this._emoteReadyAt = now + EMOTE_COOLDOWN;
@@ -2115,7 +2183,7 @@ export class UI {
         b.removeAttribute('aria-disabled');
       }
     }, EMOTE_COOLDOWN);
-    this._call('onEmote', emoji);
+    this._call(callback, emoji);
   }
 
   _renderMembers(members) {

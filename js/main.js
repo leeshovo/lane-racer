@@ -19,6 +19,7 @@ import { Effects } from './effects.js';
 import { AudioManager } from './audio.js';
 import {
   Online, partyCodeFromUrl, partyShareUrl, normalizePartyCode, generatePartyCode,
+  friendCodeFromUrl, friendShareUrl,
   dailyKey, dailyRaceId, makeRecoveryCode, parseRecoveryCode,
 } from './online.js';
 import { updateBend, setBendEnabled } from './bend.js';
@@ -59,6 +60,8 @@ const app = {
   lastRun: null,        // { seed, distance } der letzten Runde (für "Herausfordern")
   cloud: { savedAt: null, timer: 0 },
   tutorial: null,       // Tipps der ersten Runde (null = keine)
+  friendCode: null,     // eigener Freundescode (vom Server, wird beim ersten Öffnen der Freunde-Liste geholt)
+  pendingFriend: friendCodeFromUrl(), // ?friend=CODE aus dem Einladungslink
 };
 app.challenge = readChallengeFromUrl();
 
@@ -104,6 +107,11 @@ const ui = new UI({
     onCopyInvite: () => copyInvite(),
     onShareInvite: () => shareInvite(),
     onEmote: (emoji) => app.party?.sendEmote(emoji),
+    onChat: (id) => app.party?.sendChat(id),
+    onFriendAdd: (code) => addFriendByCode(code),
+    onFriendCopy: () => copyFriendLink(),
+    onFriendShare: () => shareFriendLink(),
+    onFriendRemove: (id) => removeFriendById(id),
     onSettingsChange: (partial) => changeSettings(partial),
     onSettingsReset: () => resetSettings(),
     onReplayTutorial: () => replayTutorial(),
@@ -180,6 +188,7 @@ function boot() {
     if (ok && profile.name) {
       await ensureRegistered();
       await pullCloud();
+      if (app.pendingFriend) acceptFriendLink();
       if (app.pendingParty) joinParty(app.pendingParty);
     }
   });
@@ -640,9 +649,86 @@ async function loadLeaderboard(kind) {
     ui.renderLeaderboard({ ...base, rows: [], loading: false, error: 'Keine Verbindung zur Rangliste. Prüfe deine Internetverbindung.' });
     return;
   }
+  if (kind === 'friends') {
+    await loadFriends(base);
+    return;
+  }
   const res = await online.leaderboard(kind, kind === 'daily' ? dailyKey() : app.partyCode);
   if (app.leaderboardKind !== kind || app.screen !== 'leaderboard') return; // inzwischen anderer Tab
   ui.renderLeaderboard({ ...base, rows: res.rows || [], loading: false, error: res.error || null });
+}
+
+// ---------------------------------------------------------------------------
+// Freunde
+// ---------------------------------------------------------------------------
+async function loadFriends(base) {
+  const stale = () => app.leaderboardKind !== 'friends' || app.screen !== 'leaderboard';
+  const fail = (text) => ui.renderLeaderboard({ ...base, rows: [], loading: false, error: text });
+  if (!profile.name) return fail('Such dir zuerst einen Namen aus – dann kannst du Freunde hinzufügen.');
+  if (!(await ensureRegistered())) return fail('Für Freunde brauchst du eine Verbindung. Versuch es gleich nochmal.');
+  const [board, code] = await Promise.all([
+    online.friendsBoard(profile.online),
+    app.friendCode ? Promise.resolve({ code: app.friendCode }) : online.friendCode(profile.online),
+  ]);
+  if (stale()) return;
+  if (code.code) app.friendCode = code.code;
+  ui.renderFriends({ code: app.friendCode || '', canShare: Boolean(navigator.share) });
+  ui.renderLeaderboard({ ...base, rows: board.rows || [], loading: false, error: board.error || null });
+}
+
+async function addFriendByCode(raw) {
+  if (!profile.online) return;
+  ui.renderFriends({ code: app.friendCode || '', busy: true, message: 'Wird hinzugefügt …' });
+  const res = await online.addFriend(profile.online, raw);
+  if (res.error) {
+    audio.play('error');
+    ui.renderFriends({ code: app.friendCode || '', message: res.error, error: true });
+    return;
+  }
+  audio.play('mission');
+  ui.renderFriends({ code: app.friendCode || '', message: `${res.friend.name} ist jetzt dein Freund.`, clearInput: true });
+  if (app.screen === 'leaderboard' && app.leaderboardKind === 'friends') loadFriends({ kind: 'friends', meId: profile.online.id, partyCode: app.partyCode });
+}
+
+async function removeFriendById(id) {
+  if (!profile.online) return;
+  const res = await online.removeFriend(profile.online, id);
+  if (res.error) {
+    ui.toast('Nicht geklappt', res.error, 'error');
+    return;
+  }
+  ui.toast('Freund entfernt', 'Ihr seht euch nicht mehr in der Freunde-Liste.', 'info');
+  if (app.screen === 'leaderboard' && app.leaderboardKind === 'friends') loadFriends({ kind: 'friends', meId: profile.online.id, partyCode: app.partyCode });
+}
+
+/** Wer einen Einladungslink (?friend=CODE) öffnet, wird gleich mit dem Absender verbunden. */
+async function acceptFriendLink() {
+  const code = app.pendingFriend;
+  app.pendingFriend = null;
+  try {
+    const url = new URL(location.href);
+    url.searchParams.delete('friend');
+    history.replaceState(null, '', url.pathname + url.search + url.hash);
+  } catch (err) { /* egal */ }
+  if (!code || !profile.online) return;
+  const res = await online.addFriend(profile.online, code);
+  if (res.error) ui.toast('Freundes-Link', res.error, 'error');
+  else ui.toast('Neuer Freund!', `Du und ${res.friend.name} seid jetzt verbunden – schau in die Rangliste unter „Freunde“.`, 'party');
+}
+
+function copyFriendLink() {
+  if (!app.friendCode) return;
+  const url = friendShareUrl(app.friendCode);
+  const done = () => ui.renderFriends({ code: app.friendCode, message: 'Link kopiert – schick ihn deinen Freunden.' });
+  if (navigator.clipboard?.writeText) navigator.clipboard.writeText(url).then(done, () => fallbackCopy(url) && done());
+  else if (fallbackCopy(url)) done();
+}
+
+function shareFriendLink() {
+  if (!app.friendCode) return;
+  const url = friendShareUrl(app.friendCode);
+  if (navigator.share) navigator.share({ title: 'Lane Racer', text: `Sei mein Freund in Lane Racer! Code ${app.friendCode}`, url }).catch(() => {});
+  else copyFriendLink();
 }
 
 // ===========================================================================
@@ -781,6 +867,11 @@ async function joinParty(rawCode) {
     ui.showEmote({ name: m ? m.name : 'Jemand', color: m ? m.color : '#2ec4b6', emoji });
     audio.play('emote');
   });
+  party.on('chat', ({ id, text }) => {
+    const m = app.party?.members.find((x) => x.id === id);
+    ui.showChat({ name: m ? m.name : 'Jemand', color: m ? m.color : '#2ec4b6', text });
+    audio.play('emote');
+  });
   party.on('status', (status) => {
     if (status === 'reconnecting') ui.toast('Verbindung wackelt', 'Party verbindet sich neu …', 'info');
     if (status === 'error') ui.toast('Party-Verbindung verloren', 'Wir versuchen es weiter.', 'error');
@@ -862,7 +953,7 @@ function fallbackCopy(text) {
     ok = false;
   }
   field.remove();
-  if (!ok) ui.toast('Kopieren nicht möglich', url, 'error');
+  if (!ok) ui.toast('Kopieren nicht möglich', text, 'error');
   return ok;
 }
 
