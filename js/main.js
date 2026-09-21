@@ -12,19 +12,22 @@ import {
 import {
   loadProfile, saveProfile, buyCar, selectCar, setCarColor, colorOf, applyRun, selectedCarOf,
   checkAchievements, achievementViews, unlockedColors, streakView,
-  snapshotOf, adoptSnapshot, progressOf,
 } from './storage.js';
 import { World } from './world.js';
 import { Effects } from './effects.js';
 import { AudioManager } from './audio.js';
 import {
   Online, partyCodeFromUrl, partyShareUrl, normalizePartyCode, generatePartyCode,
-  friendCodeFromUrl, friendShareUrl,
-  dailyKey, dailyRaceId, makeRecoveryCode, parseRecoveryCode,
+  friendCodeFromUrl,
+  dailyKey, dailyRaceId,
 } from './online.js';
 import { updateBend, setBendEnabled } from './bend.js';
 import { Structures } from './structures.js';
 import { Tutorial } from './tutorial.js';
+import { createFriends } from './friends.js';
+import { createCloud } from './cloud.js';
+import { copyToClipboard } from './clipboard.js';
+import { createInput } from './input.js';
 import { hashSeed } from './rng.js';
 import { UI } from './ui.js';
 import { Game } from './game.js';
@@ -76,6 +79,37 @@ const audio = new AudioManager();
 const online = new Online({ url: SUPABASE.url, key: SUPABASE.key });
 const isTouch = matchMedia('(pointer: coarse)').matches;
 
+// Aus main.js ausgelagerte Bereiche. Sie greifen über ctx auf den Zustand zu (game gibt es erst nach boot()).
+const ctx = {
+  profile,
+  app,
+  online,
+  audio,
+  get ui() { return ui; },
+  get game() { return game; },
+  ensureRegistered: () => ensureRegistered(),
+  leaveParty: () => leaveParty(),
+  refreshScreens: () => {
+    renderTopBar();
+    renderMenu();
+    if (app.screen === 'garage') renderGarage();
+    if (app.screen === 'missions') openMissions();
+  },
+};
+const friends = createFriends(ctx);
+const cloud = createCloud(ctx);
+const input = createInput({
+  app,
+  profile,
+  get ui() { return ui; },
+  get game() { return game; },
+  unlockAudio: () => unlockAudio(),
+  changeSettings: (partial) => changeSettings(partial),
+  setPaused: (paused) => setPaused(paused),
+  startRun: (options) => startRun(options),
+  toMenu: () => toMenu(),
+});
+
 // ===========================================================================
 // UI mit allen Rückrufen
 // ===========================================================================
@@ -85,8 +119,8 @@ const ui = new UI({
     onPlay: () => playPressed(),
     onOpenDaily: () => startDaily(),
     onChallenge: () => shareChallenge(),
-    onCopyRecovery: () => copyRecovery(),
-    onRestoreCode: (code) => restoreFromCode(code),
+    onCopyRecovery: () => cloud.copyRecovery(),
+    onRestoreCode: (code) => cloud.restoreFromCode(code),
     onOpenGarage: () => openGarage(),
     onOpenLeaderboard: () => openLeaderboard(),
     onOpenParty: () => openParty(),
@@ -108,10 +142,10 @@ const ui = new UI({
     onShareInvite: () => shareInvite(),
     onEmote: (emoji) => app.party?.sendEmote(emoji),
     onChat: (id) => app.party?.sendChat(id),
-    onFriendAdd: (code) => addFriendByCode(code),
-    onFriendCopy: () => copyFriendLink(),
-    onFriendShare: () => shareFriendLink(),
-    onFriendRemove: (id) => removeFriendById(id),
+    onFriendAdd: (code) => friends.add(code),
+    onFriendCopy: () => friends.copyLink(),
+    onFriendShare: () => friends.shareLink(),
+    onFriendRemove: (id) => friends.remove(id),
     onSettingsChange: (partial) => changeSettings(partial),
     onSettingsReset: () => resetSettings(),
     onReplayTutorial: () => replayTutorial(),
@@ -119,7 +153,7 @@ const ui = new UI({
     onResume: () => setPaused(false),
     onRestart: () => restartRun(),
     onToMenu: () => toMenu(),
-    onTouch: (action) => handleTouch(action),
+    onTouch: (action) => input.handleTouch(action),
     onUiSound: (name) => audio.play(name || 'click'),
   },
 });
@@ -181,14 +215,14 @@ function boot() {
   // Online-Verbindung im Hintergrund aufbauen – das Spiel läuft auch offline
   online.onStatus(() => {
     renderTopBar();
-    if (app.screen === 'settings') refreshRecoveryUi();
+    if (app.screen === 'settings') cloud.refreshRecoveryUi();
   });
   online.init().then(async (ok) => {
     renderTopBar();
     if (ok && profile.name) {
       await ensureRegistered();
-      await pullCloud();
-      if (app.pendingFriend) acceptFriendLink();
+      await cloud.pull();
+      if (app.pendingFriend) friends.acceptLink();
       if (app.pendingParty) joinParty(app.pendingParty);
     }
   });
@@ -490,7 +524,7 @@ function purchaseCar(carId) {
   app.previewCar = carId;
   game.setPlayerCar(carId, colorOf(profile, carId));
   syncPlayerOnline();
-  scheduleCloudSave();
+  cloud.scheduleSave();
   renderGarage();
   renderTopBar();
 }
@@ -513,7 +547,7 @@ function chooseCar(carId) {
   app.previewCar = carId;
   game.setPlayerCar(carId, colorOf(profile, carId));
   syncPlayerOnline();
-  scheduleCloudSave();
+  cloud.scheduleSave();
   renderGarage();
 }
 
@@ -522,7 +556,7 @@ function chooseColor(carId, color) {
   saveProfile(profile);
   if (app.previewCar === carId) game.setPlayerCar(carId, color);
   if (profile.selectedCar === carId) syncPlayerOnline();
-  scheduleCloudSave();
+  cloud.scheduleSave();
   renderGarage();
 }
 
@@ -537,7 +571,7 @@ function openMissions() {
 
 function openSettings() {
   ui.renderSettings(profile.settings);
-  refreshRecoveryUi();
+  cloud.refreshRecoveryUi();
   setScreen('settings');
 }
 
@@ -650,85 +684,12 @@ async function loadLeaderboard(kind) {
     return;
   }
   if (kind === 'friends') {
-    await loadFriends(base);
+    await friends.load(base);
     return;
   }
   const res = await online.leaderboard(kind, kind === 'daily' ? dailyKey() : app.partyCode);
   if (app.leaderboardKind !== kind || app.screen !== 'leaderboard') return; // inzwischen anderer Tab
   ui.renderLeaderboard({ ...base, rows: res.rows || [], loading: false, error: res.error || null });
-}
-
-// ---------------------------------------------------------------------------
-// Freunde
-// ---------------------------------------------------------------------------
-async function loadFriends(base) {
-  const stale = () => app.leaderboardKind !== 'friends' || app.screen !== 'leaderboard';
-  const fail = (text) => ui.renderLeaderboard({ ...base, rows: [], loading: false, error: text });
-  if (!profile.name) return fail('Such dir zuerst einen Namen aus – dann kannst du Freunde hinzufügen.');
-  if (!(await ensureRegistered())) return fail('Für Freunde brauchst du eine Verbindung. Versuch es gleich nochmal.');
-  const [board, code] = await Promise.all([
-    online.friendsBoard(profile.online),
-    app.friendCode ? Promise.resolve({ code: app.friendCode }) : online.friendCode(profile.online),
-  ]);
-  if (stale()) return;
-  if (code.code) app.friendCode = code.code;
-  ui.renderFriends({ code: app.friendCode || '', canShare: Boolean(navigator.share) });
-  ui.renderLeaderboard({ ...base, rows: board.rows || [], loading: false, error: board.error || null });
-}
-
-async function addFriendByCode(raw) {
-  if (!profile.online) return;
-  ui.renderFriends({ code: app.friendCode || '', busy: true, message: 'Wird hinzugefügt …' });
-  const res = await online.addFriend(profile.online, raw);
-  if (res.error) {
-    audio.play('error');
-    ui.renderFriends({ code: app.friendCode || '', message: res.error, error: true });
-    return;
-  }
-  audio.play('mission');
-  ui.renderFriends({ code: app.friendCode || '', message: `${res.friend.name} ist jetzt dein Freund.`, clearInput: true });
-  if (app.screen === 'leaderboard' && app.leaderboardKind === 'friends') loadFriends({ kind: 'friends', meId: profile.online.id, partyCode: app.partyCode });
-}
-
-async function removeFriendById(id) {
-  if (!profile.online) return;
-  const res = await online.removeFriend(profile.online, id);
-  if (res.error) {
-    ui.toast('Nicht geklappt', res.error, 'error');
-    return;
-  }
-  ui.toast('Freund entfernt', 'Ihr seht euch nicht mehr in der Freunde-Liste.', 'info');
-  if (app.screen === 'leaderboard' && app.leaderboardKind === 'friends') loadFriends({ kind: 'friends', meId: profile.online.id, partyCode: app.partyCode });
-}
-
-/** Wer einen Einladungslink (?friend=CODE) öffnet, wird gleich mit dem Absender verbunden. */
-async function acceptFriendLink() {
-  const code = app.pendingFriend;
-  app.pendingFriend = null;
-  try {
-    const url = new URL(location.href);
-    url.searchParams.delete('friend');
-    history.replaceState(null, '', url.pathname + url.search + url.hash);
-  } catch (err) { /* egal */ }
-  if (!code || !profile.online) return;
-  const res = await online.addFriend(profile.online, code);
-  if (res.error) ui.toast('Freundes-Link', res.error, 'error');
-  else ui.toast('Neuer Freund!', `Du und ${res.friend.name} seid jetzt verbunden – schau in die Rangliste unter „Freunde“.`, 'party');
-}
-
-function copyFriendLink() {
-  if (!app.friendCode) return;
-  const url = friendShareUrl(app.friendCode);
-  const done = () => ui.renderFriends({ code: app.friendCode, message: 'Link kopiert – schick ihn deinen Freunden.' });
-  if (navigator.clipboard?.writeText) navigator.clipboard.writeText(url).then(done, () => fallbackCopy(url) && done());
-  else if (fallbackCopy(url)) done();
-}
-
-function shareFriendLink() {
-  if (!app.friendCode) return;
-  const url = friendShareUrl(app.friendCode);
-  if (navigator.share) navigator.share({ title: 'Lane Racer', text: `Sei mein Freund in Lane Racer! Code ${app.friendCode}`, url }).catch(() => {});
-  else copyFriendLink();
 }
 
 // ===========================================================================
@@ -927,34 +888,11 @@ async function refreshPartyBoard() {
   }
 }
 
-function copyInvite() {
+async function copyInvite() {
   if (!app.partyCode) return;
   const url = partyShareUrl(app.partyCode);
-  const done = () => ui.toast('Link kopiert', 'Schick ihn an deine Freunde.', 'party');
-  if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(url).then(done, () => fallbackCopy(url) && done());
-  } else if (fallbackCopy(url)) {
-    done();
-  }
-}
-
-function fallbackCopy(text) {
-  const field = document.createElement('textarea');
-  field.value = text;
-  field.setAttribute('readonly', '');
-  field.style.position = 'fixed';
-  field.style.opacity = '0';
-  document.body.appendChild(field);
-  field.select();
-  let ok = false;
-  try {
-    ok = document.execCommand('copy');
-  } catch (err) {
-    ok = false;
-  }
-  field.remove();
-  if (!ok) ui.toast('Kopieren nicht möglich', text, 'error');
-  return ok;
+  if (await copyToClipboard(url)) ui.toast('Link kopiert', 'Schick ihn an deine Freunde.', 'party');
+  else ui.toast('Kopieren nicht möglich', url, 'error');
 }
 
 function shareInvite() {
@@ -1133,7 +1071,9 @@ function shareChallenge() {
   if (navigator.share) {
     navigator.share({ title: 'Lane Racer – Herausforderung', text, url }).catch(() => {});
   } else {
-    copyText(`${text} ${url}`, 'Herausforderung kopiert');
+    copyToClipboard(`${text} ${url}`).then((ok) => (ok
+      ? ui.toast('Herausforderung kopiert', 'In der Zwischenablage', 'info')
+      : ui.toast('Kopieren nicht möglich', url, 'error')));
   }
 }
 
@@ -1152,113 +1092,6 @@ function registerRunOnServer() {
   app.runPromise = online.beginRun(profile.online).then((res) => {
     if (token === app.runToken && res.runId) app.runId = res.runId;
   });
-}
-
-// ===========================================================================
-// Cloud-Spielstand und Sicherungscode
-// ===========================================================================
-
-function scheduleCloudSave(delay = 2500) {
-  clearTimeout(app.cloud.timer);
-  app.cloud.timer = setTimeout(pushCloud, delay);
-}
-
-async function pushCloud() {
-  if (!profile.online || online.status !== 'online') return false;
-  const res = await online.saveProfile(profile.online, snapshotOf(profile));
-  if (!res.savedAt) return false;
-  app.cloud.savedAt = res.savedAt;
-  if (app.screen === 'settings') refreshRecoveryUi();
-  return true;
-}
-
-/** Beim Start: Ist in der Cloud ein weiterer Spielstand als auf diesem Gerät? Dann den übernehmen. */
-async function pullCloud() {
-  if (!profile.online || online.status !== 'online') return;
-  const res = await online.loadProfile(profile.online);
-  if (res.error) {
-    // Der Server kennt dieses Online-Profil nicht (mehr): neues anlegen, der lokale Spielstand bleibt erhalten
-    if (res.code === 'auth') {
-      profile.online = null;
-      saveProfile(profile);
-      if (await ensureRegistered()) pushCloud();
-    }
-    return;
-  }
-  app.cloud.savedAt = res.updatedAt;
-  const cloudProgress = progressOf(res.data);
-  const localProgress = progressOf(profile);
-  if (res.data && cloudProgress > localProgress) {
-    adoptSnapshot(profile, res.data);
-    saveProfile(profile);
-    ui.toast('Spielstand geladen', 'Ein weiterer Stand aus der Cloud wurde übernommen.', 'info');
-    afterProfileChanged();
-  } else if (localProgress > cloudProgress) {
-    pushCloud();
-  }
-  if (app.screen === 'settings') refreshRecoveryUi();
-}
-
-/** Nach dem Laden/Wiederherstellen alles auffrischen, was den Spielstand zeigt. */
-function afterProfileChanged() {
-  if (game.state === 'idle') game.setPlayerCar(profile.selectedCar, colorOf(profile, profile.selectedCar));
-  renderTopBar();
-  renderMenu();
-  if (app.screen === 'garage') renderGarage();
-  if (app.screen === 'missions') openMissions();
-}
-
-function refreshRecoveryUi() {
-  let status;
-  if (!profile.online) status = 'Melde dich mit einem Namen an – dann wird dein Spielstand gesichert.';
-  else if (online.status !== 'online') status = 'Offline – gesichert wird, sobald du wieder online bist.';
-  else if (app.cloud.savedAt) status = `Zuletzt gesichert: ${new Date(app.cloud.savedAt).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} Uhr`;
-  else status = 'Wird nach deiner nächsten Runde gesichert.';
-  ui.setRecoveryCode({
-    code: makeRecoveryCode(profile.online),
-    hasProgress: profile.stats.runs > 0 || profile.stats.totalCoins > 0,
-    status,
-  });
-}
-
-function copyRecovery() {
-  const code = makeRecoveryCode(profile.online);
-  if (code) copyText(code, 'Sicherungscode kopiert');
-}
-
-/** Stellt einen Spielstand auf diesem Gerät wieder her (Code stammt von einem anderen Gerät). */
-async function restoreFromCode(text) {
-  const identity = parseRecoveryCode(text);
-  if (!identity) {
-    ui.setRestoreResult({ ok: false, message: 'Dieser Sicherungscode ist ungültig. Kopiere ihn vollständig, er beginnt mit LR1-.' });
-    return;
-  }
-  const res = await online.loadProfile(identity);
-  if (res.error) {
-    ui.setRestoreResult({ ok: false, message: res.code === 'auth' ? 'Zu diesem Code gibt es keinen Spieler. Prüfe, ob du ihn richtig kopiert hast.' : res.error });
-    return;
-  }
-  if (app.party) await leaveParty();
-  profile.online = identity;
-  profile.name = res.name;
-  if (res.data) adoptSnapshot(profile, res.data);
-  else profile.best = Math.max(profile.best, res.best);
-  saveProfile(profile);
-  app.cloud.savedAt = res.updatedAt;
-  afterProfileChanged();
-  refreshRecoveryUi();
-  ui.setRestoreResult({ ok: true, message: `Willkommen zurück, ${res.name}! Dein Spielstand ist wiederhergestellt.` });
-  audio.play('buy');
-}
-
-/** Text in die Zwischenablage kopieren (mit Rückmeldung). */
-function copyText(text, doneMessage) {
-  const done = () => ui.toast(doneMessage, 'In der Zwischenablage', 'info');
-  if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(text).then(done, () => { if (fallbackCopy(text)) done(); });
-  } else if (fallbackCopy(text)) {
-    done();
-  }
 }
 
 // ===========================================================================
@@ -1392,7 +1225,7 @@ async function finishRun(result) {
     profile.daily.best = Math.max(profile.daily.best, distance);
   }
   saveProfile(profile);
-  scheduleCloudSave(1500);
+  cloud.scheduleSave(1500);
   app.gameOverAt = performance.now();
   app.lastRun = { seed: result.seed, distance };
 
@@ -1528,119 +1361,6 @@ function unlockAudio() {
   app.audioReady = true;
   const inRun = game && game.state !== 'idle';
   audio.setMusic(inRun ? WORLDS[game.worldIndex].id : 'menu');
-}
-
-/** Einheitlicher Tastenname; manche Umgebungen liefern event.code leer. */
-function keyName(event) {
-  if (event.code) return event.code;
-  const key = event.key || '';
-  if (key === ' ') return 'Space';
-  if (key.length === 1) return `Key${key.toUpperCase()}`;
-  return key;
-}
-
-const GAME_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space']);
-
-window.addEventListener('keydown', (event) => {
-  if (event.target instanceof Element && event.target.closest('input, textarea, select')) return;
-  if (!game) return;
-  unlockAudio();
-  const code = keyName(event);
-  const inRun = game.state === 'playing' || game.state === 'countdown';
-
-  if (code === 'KeyM' && !event.repeat) {
-    const muted = profile.settings.music || profile.settings.sfx;
-    changeSettings({ music: !muted, sfx: !muted });
-    ui.toast(muted ? 'Ton aus' : 'Ton an', 'Taste M schaltet um', 'info');
-    return;
-  }
-
-  if (inRun && !app.paused) {
-    if (GAME_KEYS.has(code)) event.preventDefault();
-    switch (code) {
-      case 'ArrowLeft': case 'KeyA':
-        if (!event.repeat) game.changeLane(-1);
-        break;
-      case 'ArrowRight': case 'KeyD':
-        if (!event.repeat) game.changeLane(1);
-        break;
-      case 'ArrowUp': case 'KeyW':
-        game.setGas(true);
-        break;
-      case 'ArrowDown': case 'KeyS':
-        game.setBrake(true);
-        break;
-      case 'Space': case 'ShiftLeft': case 'ShiftRight': case 'KeyN':
-        if (!event.repeat) game.triggerNitro();
-        break;
-      case 'KeyF': case 'KeyE':
-        if (!event.repeat) game.useAbility();
-        break;
-      case 'KeyP': case 'Escape':
-        if (!event.repeat) setPaused(true);
-        break;
-      case 'KeyH':
-        if (!event.repeat) game.setDebugHitboxes(!game.debugHitboxes);
-        break;
-      default:
-        break;
-    }
-    return;
-  }
-
-  if (app.paused) {
-    if (!event.repeat && ['KeyP', 'Escape', 'Enter'].includes(code)) {
-      event.preventDefault();
-      setPaused(false);
-    }
-    return;
-  }
-
-  // Menüs: Enter/Leertaste nur, wenn kein Button den Fokus hat (sonst doppelt)
-  const onButton = event.target instanceof Element && event.target.closest('button, a, [role="button"]');
-  if (app.screen === 'gameover' && !event.repeat) {
-    if ((code === 'Enter' || code === 'Space') && !onButton && performance.now() - app.gameOverAt > 700) {
-      event.preventDefault();
-      startRun({});
-    } else if (code === 'Escape') {
-      toMenu();
-    }
-  } else if (app.screen === 'menu' && !event.repeat && (code === 'Enter' || code === 'Space') && !onButton) {
-    event.preventDefault();
-    startRun({});
-  } else if (app.screen !== 'menu' && app.screen !== 'hud' && code === 'Escape' && !event.repeat) {
-    toMenu();
-  }
-});
-
-window.addEventListener('keyup', (event) => {
-  if (!game) return;
-  switch (keyName(event)) {
-    case 'ArrowUp': case 'KeyW':
-      game.setGas(false);
-      break;
-    case 'ArrowDown': case 'KeyS':
-      game.setBrake(false);
-      break;
-    default:
-      break;
-  }
-});
-
-function handleTouch(action) {
-  unlockAudio();
-  if (app.paused) return;
-  switch (action) {
-    case 'left': game.changeLane(-1); break;
-    case 'right': game.changeLane(1); break;
-    case 'nitro': game.triggerNitro(); break;
-    case 'ability': game.useAbility(); break;
-    case 'gas:down': game.setGas(true); break;
-    case 'gas:up': game.setGas(false); break;
-    case 'brake:down': game.setBrake(true); break;
-    case 'brake:up': game.setBrake(false); break;
-    default: break;
-  }
 }
 
 // ---------------------------------------------------------------------------

@@ -1,14 +1,16 @@
 {
   "name": "lane-racer",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "private": true,
   "type": "module",
   "description": "Lane Racer – 3D-Autorennen im Browser (kein Build-Schritt nötig; npm wird nur für die Tests gebraucht)",
   "scripts": {
     "test": "node --import ./tests/register.mjs --test \"tests/*.test.mjs\"",
-    "start": "npx serve ."
+    "start": "npx serve .",
+    "test:e2e": "node tests/e2e/smoke.mjs"
   },
   "devDependencies": {
-    "three": "0.186.0"
+    "three": "0.186.0",
+    "playwright-core": "1.49.1"
   }
 }

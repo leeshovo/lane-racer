@@ -3,7 +3,7 @@
  * Einheiten: Meter, Sekunden, m/s (× 3,6 = km/h). Fahrtrichtung = -z.
  */
 
-export const VERSION = '2.2.0';
+export const VERSION = '2.3.0';
 
 // Öffentliche Supabase-Zugangsdaten (Publishable Key darf im Browser stehen –
 // geschützt wird über Row Level Security und geprüfte Server-Funktionen).

@@ -8,7 +8,7 @@
  *
  * Bei einem Update die Version unten erhöhen: Der alte Cache wird dann aufgeräumt.
  */
-const VERSION = 'lane-racer-2.2.0';
+const VERSION = 'lane-racer-2.3.0';
 const CDN_HOSTS = new Set(['cdn.jsdelivr.net', 'fonts.googleapis.com', 'fonts.gstatic.com']);
 const NETWORK_TIMEOUT_MS = 4000;
 
@@ -26,6 +26,11 @@ const APP_SHELL = [
   'js/bend.js',
   'js/structures.js',
   'js/tutorial.js',
+  'js/clipboard.js',
+  'js/friends.js',
+  'js/cloud.js',
+  'js/input.js',
+  'js/ui-kit.js',
   'js/game.js',
   'js/cars.js',
   'js/world.js',
