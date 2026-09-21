@@ -257,6 +257,19 @@ export const TRAFFIC = [
 ];
 export const TRAFFIC_COLORS = ['#2f7de1', '#f2c200', '#2fbf71', '#e9ecef', '#8e5bd6', '#1fb5c9', '#3a4250', '#9aa5b1', '#7a1f2b'];
 
+/**
+ * Schwierigkeit für normale Solo-Runden. Tagesrennen, Party und Herausforderungen laufen immer auf "normal",
+ * damit alle denselben Verkehr sehen. Das Tempo bleibt gleich – Scores bleiben also vergleichbar und
+ * die Grenze, die der Server prüft, unverändert.
+ *   spacing = Reihenabstand ×, double = Aufschlag für zwei Autos nebeneinander, coins = Münz-Faktor,
+ *   ranked = zählt für Rekord und Online-Rangliste
+ */
+export const DIFFICULTY_MODES = {
+  easy:   { label: 'Entspannt', spacing: 1.2, double: -0.1,  coins: 0.75, ranked: false },
+  normal: { label: 'Normal',    spacing: 1,   double: 0,     coins: 1,    ranked: true },
+  hard:   { label: 'Hardcore',  spacing: 1,   double: 0.12,  coins: 1.25, ranked: true },
+};
+
 export const POWERUPS = {
   nitro:  { name: 'Nitro',       color: '#00e5ff' },
   shield: { name: 'Schild',      color: '#7cf29c' },
@@ -279,6 +292,9 @@ export const MISSION_POOL = [
   { id: 'daily',    stat: 'dailyRuns',      mode: 'total', text: 'Fahre {n} Tagesrennen',                 tiers: [[1, 150], [3, 300], [7, 600]] },
   { id: 'party',    stat: 'partyRaces',     mode: 'total', text: 'Fahre {n} Party-Rennen mit Freunden',   tiers: [[1, 200], [3, 400], [10, 1000]] },
 ];
+
+// Power-ups in Farben, die auch bei Rot-Grün-Schwäche unterscheidbar sind (zusätzlich hat jedes eine eigene Form)
+export const POWERUP_COLORBLIND = { nitro: '#00E5FF', shield: '#FFFFFF', magnet: '#FF8A00', double: '#FFE600' };
 
 export const EMOTES = ['👍', '🔥', '😂', '😱', '🏁', '💀'];
 
@@ -309,6 +325,13 @@ export const DEFAULT_SETTINGS = {
   keyHints: true,
   vibrate: true,
   autoPause: true,
+  // Spiel
+  difficulty: 'normal',
+  // Barrierefreiheit
+  contrast: false,
+  textSize: 'normal',
+  reduceMotion: false,
+  colorblind: false,
 };
 
 export const SETTINGS_GROUPS = [
@@ -342,6 +365,17 @@ export const SETTINGS_GROUPS = [
     ],
   },
   {
+    id: 'gameplay',
+    title: 'Spiel',
+    items: [
+      {
+        key: 'difficulty', type: 'seg', label: 'Schwierigkeit',
+        desc: 'Gilt für normale Runden. Entspannt zählt nicht für Rekord und Rangliste (Münzen ×0,75), Hardcore bringt ×1,25 Münzen. Tagesrennen, Party und Herausforderungen sind immer Normal.',
+        options: [['easy', 'Entspannt'], ['normal', 'Normal'], ['hard', 'Hardcore']],
+      },
+    ],
+  },
+  {
     id: 'display',
     title: 'Anzeige und Steuerung',
     items: [
@@ -349,6 +383,16 @@ export const SETTINGS_GROUPS = [
       { key: 'keyHints', type: 'switch', label: 'Tastenhinweise', desc: 'Tipps zu den Tasten im Menü und während der Fahrt' },
       { key: 'autoPause', type: 'switch', label: 'Automatisch pausieren', desc: 'Das Spiel hält an, wenn du das Fenster verlässt' },
       { key: 'vibrate', type: 'switch', label: 'Vibration', desc: 'Handy vibriert bei Crash, Nitro und Rammen' },
+    ],
+  },
+  {
+    id: 'access',
+    title: 'Barrierefreiheit',
+    items: [
+      { key: 'textSize', type: 'seg', label: 'Textgröße', options: [['normal', 'Normal'], ['large', 'Groß'], ['xlarge', 'Sehr groß']] },
+      { key: 'contrast', type: 'switch', label: 'Hoher Kontrast', desc: 'Hellere Schrift, kräftigere Rahmen, weniger Transparenz' },
+      { key: 'reduceMotion', type: 'switch', label: 'Weniger Bewegung', desc: 'Schaltet Kamerawackeln, Tempo-Effekte, Kurven und Animationen ab' },
+      { key: 'colorblind', type: 'switch', label: 'Farbenblind-freundlich', desc: 'Power-ups und Anzeigen in Farben, die sich auch ohne Rot-Grün-Sicht unterscheiden' },
     ],
   },
 ];

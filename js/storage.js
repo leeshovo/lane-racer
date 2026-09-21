@@ -6,7 +6,7 @@
  * Zusätzlich gibt es einen "Snapshot" des Spielstands, der in der Cloud
  * gesichert und auf einem anderen Gerät wiederhergestellt werden kann.
  */
-import { CARS, MISSION_POOL, CONFIG, carById, DEFAULT_SETTINGS, sanitizeSettings } from './config.js';
+import { CARS, MISSION_POOL, CONFIG, DIFFICULTY_MODES, carById, DEFAULT_SETTINGS, sanitizeSettings } from './config.js';
 
 const KEY = 'laneRacer2.profile';
 const ACTIVE_MISSIONS = 3;
@@ -207,6 +207,11 @@ export function applyRun(profile, run) {
     perk: 0,
     missions: 0,
   };
+  const modeDef = DIFFICULTY_MODES[run.mode] || DIFFICULTY_MODES.normal;
+  if (modeDef.coins !== 1) {
+    // Schwierigkeit wirkt auf jede Zeile, damit die Summe in der Anzeige stimmt
+    for (const key of ['collected', 'nearMiss', 'smash', 'distance']) breakdown[key] = Math.round(breakdown[key] * modeDef.coins);
+  }
   const subtotal = breakdown.collected + breakdown.nearMiss + breakdown.smash + breakdown.distance;
   if (car.perk === 'coinBonus') breakdown.perk = Math.round(subtotal * 0.2);
 
@@ -254,8 +259,8 @@ export function applyRun(profile, run) {
   profile.coins += total;
   s.totalCoins += total;
 
-  const newBest = distance > profile.best;
+  const newBest = modeDef.ranked && distance > profile.best;
   if (newBest) profile.best = distance;
 
-  return { breakdown, total, completed, newBest };
+  return { breakdown, total, completed, newBest, ranked: modeDef.ranked, mode: run.mode || 'normal' };
 }

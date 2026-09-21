@@ -11,7 +11,7 @@
  */
 import * as THREE from 'three';
 import {
-  CONFIG, LANE_X, LANE_COUNT, PLAYER_SIZE, TRAFFIC, TRAFFIC_COLORS, POWERUPS,
+  CONFIG, LANE_X, LANE_COUNT, PLAYER_SIZE, TRAFFIC, TRAFFIC_COLORS, POWERUPS, POWERUP_COLORBLIND, DIFFICULTY_MODES,
   WORLDS, worldIndexForLevel, carById,
 } from './config.js';
 import { createRng } from './rng.js';
@@ -89,6 +89,8 @@ export class Game {
     this.events = events;
 
     this.state = 'idle'; // 'idle' | 'countdown' | 'playing' | 'crashed' | 'over'
+    this.mode = 'normal';
+    this.modeDef = DIFFICULTY_MODES.normal;
     this.night = false;
     this.debugHitboxes = false;
 
@@ -155,11 +157,14 @@ export class Game {
 
   /**
    * Neue Runde vorbereiten und Countdown starten.
-   * @param {object} opts { seed, raceId, party, countdown (s) }
+   * @param {object} opts { seed, raceId, party, countdown (s), mode ('easy'|'normal'|'hard') }
    */
-  start({ seed = `${Date.now()}-${Math.random()}`, raceId = null, party = null, countdown = CONFIG.countdownSolo } = {}) {
+  start({ seed = `${Date.now()}-${Math.random()}`, raceId = null, party = null, countdown = CONFIG.countdownSolo, mode = 'normal' } = {}) {
     this.#clearRun();
     this.#resetRun();
+    // Gemeinsame Strecken (Party, Tagesrennen) sind immer "normal", damit alle denselben Verkehr sehen
+    this.mode = raceId ? 'normal' : (mode in DIFFICULTY_MODES ? mode : 'normal');
+    this.modeDef = DIFFICULTY_MODES[this.mode];
     this.rng = createRng(seed);
     this.seed = seed;
     this.raceId = raceId;
@@ -539,7 +544,7 @@ export class Game {
 
     this.safeLane = clamp(this.safeLane + rng.int(-1, 1), 0, LANE_COUNT - 1);
 
-    let doubleChance = lerp(CONFIG.doubleChanceStart, CONFIG.doubleChanceEnd, this.difficulty);
+    let doubleChance = clamp(lerp(CONFIG.doubleChanceStart, CONFIG.doubleChanceEnd, this.difficulty) + this.modeDef.double, 0.02, 0.85);
     if (ev === 'rush') doubleChance = Math.min(0.85, doubleChance + CONFIG.rushDoubleBonus);
     let count = rng.chance(doubleChance) ? 2 : 1;
     if (count === 2 && this.freeLanes.some((lane) => Math.abs(lane - this.safeLane) > 1)) count = 1;
@@ -560,7 +565,7 @@ export class Game {
     }
 
     this.lastRowZ = z;
-    let base = lerp(CONFIG.rowSpacingStart, CONFIG.rowSpacingEnd, this.difficulty);
+    let base = lerp(CONFIG.rowSpacingStart, CONFIG.rowSpacingEnd, this.difficulty) * this.modeDef.spacing;
     if (ev === 'rush') base *= CONFIG.rushSpacingFactor;
     let spacing = base * (1 + rng.next() * CONFIG.rowSpacingJitter);
     // Fairness: Vor und hinter dem 15 m langen Konvoi extra Platz zum Spurwechseln
@@ -809,13 +814,36 @@ export class Game {
     this.coins = Array.from({ length: MAX_COINS }, () => ({ active: false, x: 0, y: 1, z: 0, pulled: false }));
     this.coinSpin = 0;
 
-    // Power-up-Modelle: leuchtender Kristall mit Ring
-    this.powerupGeometry = new THREE.OctahedronGeometry(0.55, 0);
+    // Power-up-Modelle: leuchtender Kristall mit Ring – jede Art hat eine eigene Form (auch ohne Farbsicht erkennbar)
+    this.powerupGeometries = {
+      nitro: new THREE.OctahedronGeometry(0.62, 0),
+      shield: new THREE.IcosahedronGeometry(0.56, 0),
+      magnet: new THREE.ConeGeometry(0.5, 1.15, 4),
+      double: new THREE.BoxGeometry(0.72, 0.72, 0.72),
+    };
     this.powerupRingGeometry = new THREE.TorusGeometry(0.95, 0.06, 8, 40);
     this.powerupMaterials = Object.fromEntries(Object.entries(POWERUPS).map(([type, def]) => [type, {
       core: new THREE.MeshStandardMaterial({ color: def.color, emissive: def.color, emissiveIntensity: 2.6, roughness: 0.3, metalness: 0.2 }),
       ring: new THREE.MeshBasicMaterial({ color: def.color, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false }),
     }]));
+    this.colorblind = false;
+  }
+
+  /** Farbenblind-freundliche Power-up-Farben an/aus. */
+  setColorblind(on) {
+    this.colorblind = Boolean(on);
+    for (const [type, def] of Object.entries(POWERUPS)) {
+      const color = this.colorblind ? POWERUP_COLORBLIND[type] : def.color;
+      const mats = this.powerupMaterials[type];
+      mats.core.color.set(color);
+      mats.core.emissive.set(color);
+      mats.ring.color.set(color);
+    }
+  }
+
+  /** Farbe eines Power-ups (für Anzeigen), je nach Palette. */
+  powerupColor(type) {
+    return this.colorblind ? POWERUP_COLORBLIND[type] : POWERUPS[type].color;
   }
 
   #spawnCoinLine(lane, z, length = CONFIG.coinsPerLine) {
@@ -834,7 +862,7 @@ export class Game {
   #spawnPowerup(type, lane, z) {
     const group = new THREE.Group();
     const mats = this.powerupMaterials[type];
-    const core = new THREE.Mesh(this.powerupGeometry, mats.core);
+    const core = new THREE.Mesh(this.powerupGeometries[type], mats.core);
     const ring = new THREE.Mesh(this.powerupRingGeometry, mats.ring);
     core.castShadow = true;
     group.add(core, ring);
@@ -899,7 +927,7 @@ export class Game {
       case 'double': this.doubleTimer = CONFIG.doubleCoinsTime; break;
       default: break;
     }
-    this.effects.pickupFlash(position, POWERUPS[type].color);
+    this.effects.pickupFlash(position, this.powerupColor(type));
     this.audio.play(type === 'shield' ? 'shieldUp' : 'powerup');
     this.events.onPowerup?.(type);
   }
@@ -1099,6 +1127,7 @@ export class Game {
       isDaily: Boolean(this.raceId) && String(this.raceId).startsWith('daily-'),
       seed: this.seed,
       car: this.carId,
+      mode: this.mode,
     };
   }
 }

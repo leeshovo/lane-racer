@@ -3749,3 +3749,47 @@ button.chip:hover .chip__edit { opacity: 1; color: var(--gold); }
   animation: none;
   transition: width 0.25s ease;
 }
+
+/* ===========================================================================
+ * Barrierefreiheit (Einstellungen → Barrierefreiheit)
+ * ======================================================================== */
+html.text-large { font-size: 112.5%; }
+html.text-large body { font-size: clamp(17px, 0.52vw + 15px, 21px); }
+html.text-xlarge { font-size: 125%; }
+html.text-xlarge body { font-size: clamp(19px, 0.52vw + 17px, 24px); }
+
+/* Hoher Kontrast: hellere Schrift, kräftige Rahmen, dichte Flächen statt Glas */
+html.hc {
+  --text: #FFFFFF;
+  --muted: #D5DBE6;
+  --line: #6B7A93;
+  --hairline: rgba(255, 255, 255, 0.42);
+  --raise: rgba(255, 255, 255, 0.12);
+  --raise-2: rgba(255, 255, 255, 0.2);
+  --panel: rgba(4, 6, 10, 0.97);
+  --panel-2: rgba(10, 14, 22, 0.98);
+}
+html.hc .btn,
+html.hc .seg__btn,
+html.hc .setting,
+html.hc .card { border: 2px solid var(--line); }
+html.hc :focus-visible { outline: 3px solid #FFFFFF; outline-offset: 3px; }
+
+/* Farbenblind-freundlich: statt Rot/Grün Pink und Himmelblau */
+html.cb {
+  --good: #4CC3FF;
+  --danger: #FF4D8D;
+}
+
+/* Weniger Bewegung */
+html.reduce-motion *,
+html.reduce-motion *::before,
+html.reduce-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* Sichtbarer Fokus für Tastatur-Bedienung */
+:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }

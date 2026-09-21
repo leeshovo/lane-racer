@@ -2392,6 +2392,9 @@ export class UI {
     } else if (d.online === 'pending') {
       text = 'Rangliste wird abgefragt …';
       state = 'pending';
+    } else if (d.online === 'practice') {
+      text = 'Übungsrunde – zählt nicht für Rekord und Rangliste';
+      state = 'off';
     } else if (d.online === 'offline') {
       text = 'Offline – nur lokal gespeichert';
       state = 'off';

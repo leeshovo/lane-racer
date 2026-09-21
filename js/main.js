@@ -243,7 +243,7 @@ function frame(now) {
   const inRun = game.state === 'playing' || game.state === 'countdown';
   const settings = profile.settings;
   effects.setBloom(settings.bloom ? world.bloom : { ...world.bloom, strength: 0 });
-  const speedFx = settings.speedFx;
+  const speedFx = settings.speedFx && !settings.reduceMotion;
   effects.setSpeedLines(speedFx ? (game.nitroActive ? 1 : Math.max(0, speedRatio - 0.62) * 1.6) : 0);
   effects.update(running ? dt : 0, { worldSpeed: speed, speedRatio, nitro: game.nitroActive && speedFx });
 
@@ -317,7 +317,7 @@ function updateCamera(dt) {
     const speedRatio = clamp((game.player.speed - CONFIG.startSpeed) / (TOP_SPEED - CONFIG.startSpeed), 0, 1);
     rig.goal.set(px * 0.6, CONFIG.cameraHeight - speedRatio * 0.2, CONFIG.cameraDistance + speedRatio * 1.4);
     rig.lookGoal.set(px * 0.85, 0.9, -CONFIG.lookAhead);
-    if (profile.settings.speedFx) targetFov += speedRatio * CONFIG.fovBoost + (game.nitroActive ? CONFIG.fovNitro : 0);
+    if (profile.settings.speedFx && !profile.settings.reduceMotion) targetFov += speedRatio * CONFIG.fovBoost + (game.nitroActive ? CONFIG.fovNitro : 0);
     rig.base.lerp(rig.goal, smoothing(5, dt));
     rig.look.lerp(rig.lookGoal, smoothing(8, dt));
   } else {
@@ -333,7 +333,7 @@ function updateCamera(dt) {
   }
 
   camera.position.copy(rig.base);
-  const shake = (game.shake * 0.45 + (game.nitroActive ? 0.05 : 0)) * SHAKE_FACTOR[profile.settings.shake];
+  const shake = (game.shake * 0.45 + (game.nitroActive ? 0.05 : 0)) * (profile.settings.reduceMotion ? 0 : SHAKE_FACTOR[profile.settings.shake]);
   if (shake > 0 && !app.paused) {
     camera.position.x += (Math.random() - 0.5) * shake;
     camera.position.y += (Math.random() - 0.5) * shake;
@@ -514,8 +514,19 @@ function worldSubtitle(index, time) {
 /** Kamerawackeln: Faktor je Einstellung. */
 const SHAKE_FACTOR = { off: 0, low: 0.4, normal: 1 };
 
+let previewTimer = 0;
+/** Kurzer Testton, damit man die Lautstärke beim Einstellen hört (erst wenn der Regler ruht). */
+function previewVolume(partial) {
+  if (!('volume' in partial || 'sfxVolume' in partial || 'engineVolume' in partial)) return;
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(() => {
+    if (app.screen === 'settings') audio.play('coin');
+  }, 220);
+}
+
 function changeSettings(partial) {
   const before = profile.settings;
+  previewVolume(partial);
   const qualityChanged = partial.quality && partial.quality !== before.quality;
   profile.settings = sanitizeSettings({ ...before, ...partial });
   saveProfile(profile);
@@ -543,8 +554,15 @@ function resetSettings() {
 /** Einstellungen, die nicht Ton sind: Kurven, Tempo-Einheit, Bildraten-Zähler. */
 function applyVisualSettings() {
   const s = profile.settings;
-  setBendEnabled(s.bend);
+  setBendEnabled(s.bend && !s.reduceMotion);
   ui.setSpeedUnit(s.unit);
+  game.setColorblind(s.colorblind);
+  const root = document.documentElement;
+  root.classList.toggle('text-large', s.textSize === 'large');
+  root.classList.toggle('text-xlarge', s.textSize === 'xlarge');
+  root.classList.toggle('hc', s.contrast);
+  root.classList.toggle('cb', s.colorblind);
+  root.classList.toggle('reduce-motion', s.reduceMotion);
   if (s.fps && !fpsCounter.el) {
     fpsCounter.el = document.createElement('div');
     fpsCounter.el.id = 'fps-counter';
@@ -1157,6 +1175,7 @@ function startRun({ seed, raceId = null, countdown, challenge = null, remember =
     raceId,
     party: app.partyCode,
     countdown: countdown ?? CONFIG.countdownSolo,
+    mode: profile.settings.difficulty,
   });
 
   setCameraMode('follow');
@@ -1195,7 +1214,7 @@ const gameEvents = {
   },
   onPowerup(type) {
     ui.popup(POWERUPS[type].name, 'power');
-    ui.flash(POWERUPS[type].color);
+    ui.flash(game.powerupColor(type));
   },
   onShieldBreak() {
     ui.flash('#7cf29c');
@@ -1260,7 +1279,8 @@ async function finishRun(result) {
     app.race?.results.set(profile.online?.id, { score: distance, alive: false });
   }
 
-  const canSubmit = Boolean(profile.online) && online.status === 'online' && result.duration >= 1;
+  // Entspannte Runden sind zum Üben da und zählen nicht für die Rangliste
+  const canSubmit = summary.ranked && Boolean(profile.online) && online.status === 'online' && result.duration >= 1;
   setScreen('gameover');
   ui.showGameOver({
     distance,
@@ -1277,7 +1297,7 @@ async function finishRun(result) {
       time: result.duration,
     },
     race: result.isPartyRace ? raceView() : null,
-    online: canSubmit ? 'pending' : 'offline',
+    online: !summary.ranked ? 'practice' : canSubmit ? 'pending' : 'offline',
   });
   renderTopBar();
   audio.setMusicIntensity(0.25);
@@ -1289,7 +1309,7 @@ async function finishRun(result) {
 
   if (!canSubmit) {
     // Später erneut versuchen, falls die Registrierung noch fehlt
-    ensureRegistered();
+    if (summary.ranked) ensureRegistered();
     return;
   }
   await app.runPromise;
