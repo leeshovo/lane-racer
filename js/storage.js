@@ -25,6 +25,7 @@ export function defaultProfile() {
     missionTier: {},
     daily: { key: '', best: 0 }, // bester Versuch im Tagesrennen des Tages "key" (YYYYMMDD)
     settings: { ...DEFAULT_SETTINGS },
+    tutorialDone: false, // Tipps in der ersten Runde schon gesehen?
     online: null, // { id, secret } nach der Registrierung
   };
 }
@@ -38,6 +39,8 @@ function normalize(stored) {
   p.stats = { ...base.stats, ...(stored.stats || {}) };
   for (const k of Object.keys(base.stats)) p.stats[k] = Math.max(0, Math.floor(Number(p.stats[k]) || 0));
   p.settings = sanitizeSettings(stored.settings);
+  // Wer schon gespielt hat, braucht kein Tutorial mehr
+  p.tutorialDone = typeof stored.tutorialDone === 'boolean' ? stored.tutorialDone : Number(stored.stats && stored.stats.runs) > 0;
   p.colors = { ...base.colors, ...(stored.colors || {}) };
   // Nur erlaubte Lackfarben der jeweiligen Autos übernehmen
   for (const car of CARS) if (!car.colors.includes(p.colors[car.id])) p.colors[car.id] = car.colors[0];
@@ -112,6 +115,7 @@ export function adoptSnapshot(profile, data) {
     settings: profile.settings,
     online: profile.online,
     daily: profile.daily,
+    tutorialDone: profile.tutorialDone,
   });
   Object.assign(profile, merged);
   return profile;

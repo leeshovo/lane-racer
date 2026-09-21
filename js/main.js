@@ -22,6 +22,7 @@ import {
 } from './online.js';
 import { updateBend, setBendEnabled } from './bend.js';
 import { Structures } from './structures.js';
+import { Tutorial } from './tutorial.js';
 import { hashSeed } from './rng.js';
 import { UI } from './ui.js';
 import { Game } from './game.js';
@@ -56,6 +57,7 @@ const app = {
   activeChallenge: null,
   lastRun: null,        // { seed, distance } der letzten Runde (für "Herausfordern")
   cloud: { savedAt: null, timer: 0 },
+  tutorial: null,       // Tipps der ersten Runde (null = keine)
 };
 app.challenge = readChallengeFromUrl();
 
@@ -103,6 +105,7 @@ const ui = new UI({
     onEmote: (emoji) => app.party?.sendEmote(emoji),
     onSettingsChange: (partial) => changeSettings(partial),
     onSettingsReset: () => resetSettings(),
+    onReplayTutorial: () => replayTutorial(),
     onPause: () => setPaused(true),
     onResume: () => setPaused(false),
     onRestart: () => restartRun(),
@@ -259,7 +262,9 @@ function frame(now) {
   });
 
   if (inRun || game.state === 'crashed') {
-    ui.updateHud({ ...game.hud(), live: liveList(now), race: Boolean(app.race && app.race.raceId === game.raceId) });
+    const hud = game.hud();
+    ui.updateHud({ ...hud, live: liveList(now), race: Boolean(app.race && app.race.raceId === game.raceId) });
+    if (app.tutorial && game.state === 'playing' && running) updateTutorial(hud, dt);
     if (app.party && running) app.party.sendState(game.liveState());
   }
 
@@ -1178,6 +1183,10 @@ function startRun({ seed, raceId = null, countdown, challenge = null, remember =
     mode: profile.settings.difficulty,
   });
 
+  // Tipps nur in der ersten normalen Runde – nicht in Party, Tagesrennen oder Herausforderung
+  app.tutorial = !profile.tutorialDone && !raceId && !challenge ? new Tutorial({ touch: isTouch }) : null;
+  ui.setTip(null);
+
   setCameraMode('follow');
   setScreen('hud');
   if (app.party) app.party.setStatus('countdown');
@@ -1256,6 +1265,7 @@ const gameEvents = {
 };
 
 async function finishRun(result) {
+  if (app.tutorial) endTutorial(false);
   const summary = applyRun(profile, result);
   const distance = Math.floor(result.distance);
   if (result.isDaily) {
@@ -1338,6 +1348,38 @@ async function finishRun(result) {
   } else {
     ui.updateGameOver({ online: 'error' });
   }
+}
+
+/** Tipps der ersten Runde: füttert tutorial.js mit dem Spielstand und zeigt den passenden Tipp. */
+function updateTutorial(hud, dt) {
+  const tip = app.tutorial.update({
+    distance: game.distance,
+    lane: game.player.lane,
+    coins: hud.coins,
+    nearMisses: game.nearMisses,
+    nitroReady: hud.nitroReady,
+    nitroActive: hud.nitroActive,
+    abilityReady: Boolean(hud.ability && hud.ability.ready),
+    abilityActive: Boolean(hud.ability && hud.ability.active),
+    abilityName: hud.ability ? hud.ability.name : '',
+  }, dt);
+  ui.setTip(tip);
+  if (app.tutorial.finished) endTutorial(true);
+}
+
+function endTutorial(completed) {
+  ui.setTip(null);
+  if (app.tutorial && (completed || app.tutorial.completed.length >= 2)) {
+    profile.tutorialDone = true;
+    saveProfile(profile);
+  }
+  app.tutorial = null;
+}
+
+function replayTutorial() {
+  profile.tutorialDone = false;
+  saveProfile(profile);
+  ui.toast('Tipps aktiviert', 'In deiner nächsten Solo-Runde erscheinen die Tipps wieder.', 'info');
 }
 
 function setPaused(paused) {

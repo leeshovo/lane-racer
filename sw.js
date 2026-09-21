@@ -25,6 +25,7 @@ const APP_SHELL = [
   'js/storage.js',
   'js/bend.js',
   'js/structures.js',
+  'js/tutorial.js',
   'js/game.js',
   'js/cars.js',
   'js/world.js',

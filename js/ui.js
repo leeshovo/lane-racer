@@ -1389,6 +1389,13 @@ export class UI {
       hd.ability,
       hd.nitro);
 
+    // Tipp der ersten Runde (siehe tutorial.js)
+    hd.tipText = h('span', { class: 'tip__text' });
+    hd.tipStep = h('span', { class: 'tip__step' });
+    hd.tip = h('div', { class: 'tip', role: 'status', hidden: true },
+      h('span', { class: 'tip__tag' }, 'Tipp'), hd.tipText, hd.tipStep);
+    hd.tipId = '';
+
     const keys = h('p', { class: 'hud-keys', 'aria-hidden': 'true' },
       h('kbd', null, '←'), h('kbd', null, '→'), ' Spur ',
       h('kbd', null, '↑'), ' Gas ',
@@ -1396,9 +1403,22 @@ export class UI {
       h('kbd', null, 'P'), ' Pause');
 
     const stats = h('div', { class: 'hud-stats', 'aria-hidden': 'true' }, topLeft, speedBox, bottom, keys);
-    const sec = this._screen('hud', h('div', { class: 'hud-vignette', 'aria-hidden': 'true' }), stats, topRight, hd.live);
+    const sec = this._screen('hud', h('div', { class: 'hud-vignette', 'aria-hidden': 'true' }), stats, topRight, hd.live, hd.tip);
     sec.setAttribute('aria-label', 'Fahranzeige');
     this.hd = hd;
+  }
+
+  /** Zeigt einen Tipp der ersten Runde ({ id, text, step, steps }) oder blendet ihn aus (null). */
+  setTip(tip) {
+    const hd = this.hd;
+    const id = tip ? tip.id : '';
+    if (id === hd.tipId) return;
+    hd.tipId = id;
+    hd.tip.hidden = !tip;
+    if (!tip) return;
+    hd.tipText.textContent = tip.text;
+    hd.tipStep.textContent = `${tip.step}/${tip.steps}`;
+    if (!this.reducedMotion) animate(hd.tip, FRAMES.popIn, { duration: 320, easing: 'ease-out' });
   }
 
   _updatePowerup(pu, left) {
@@ -2282,9 +2302,17 @@ export class UI {
       h('button', { type: 'button', class: 'btn btn--ghost btn--sm', onClick: () => this._call('onSettingsReset') },
         icon('restart'), h('span', { class: 'btn__label' }, 'Zurücksetzen')));
 
+    const tutorialRow = h('div', { class: 'setting setting--reset' },
+      h('span', { class: 'setting__text' },
+        h('span', { class: 'setting__label' }, 'Tipps wiederholen'),
+        h('span', { class: 'setting__desc' }, 'Zeigt die Einsteiger-Tipps in deiner nächsten Solo-Runde noch einmal.')),
+      h('button', { type: 'button', class: 'btn btn--ghost btn--sm', onClick: () => this._call('onReplayTutorial') },
+        icon('info'), h('span', { class: 'btn__label' }, 'Tipps zeigen')));
+
     this._sheet('settings', { kicker: 'Optionen', title: 'Einstellungen' },
       h('div', { class: 'sheet__body' },
         groups,
+        h('div', { class: 'settings-group' }, tutorialRow),
         h('div', { class: 'settings-group' }, nameRow),
         h('div', { class: 'settings-group' }, cloudRow),
         h('div', { class: 'settings-group' }, controls),
