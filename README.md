@@ -59,14 +59,16 @@ Bremse, Nitro und Fähigkeit.
 
 ## Einstellungen
 
-Im Hauptmenü unter **Einstellungen** (im Spiel auch über die Pause):
+Im Hauptmenü unter **Einstellungen** (im Spiel auch über die Pause). Sie sind in Reiter unterteilt:
+**Ton · Grafik · Spiel · Anzeige · Steuerung · Konto**.
 
 - **Ton:** Musik und Effekte einzeln an/aus, Gesamtlautstärke, Musik, Effekte und Motorgeräusch als Regler und
   **Im Hintergrund stumm** (Standard: an). Sobald du den Tab oder das Fenster wechselst, wird der komplette Ton
   angehalten – auch die Menümusik. Kommst du zurück, geht er nahtlos weiter.
 - **Grafik und Effekte:** Qualität (Auto/Hoch/Mittel/Niedrig), Kurven und Hügel, Leuchteffekte, Tempo-Effekte, Kamerawackeln.
-- **Spiel:** Schwierigkeit (Entspannt, Normal, Hardcore).
-- **Anzeige und Steuerung:** Einheit km/h oder mph, FPS-Anzeige, Tastenhinweise, Vibration (Handy), automatische Pause beim Tab-Wechsel.
+- **Spiel:** Schwierigkeit (Entspannt, Normal, Hardcore), **Hinweise im Spiel** (Keine, Wenige, Alle – Standard: Wenige;
+  Erfolge, Missionen und Serie kommen gesammelt am Rundenende), automatische Pause, Vibration und die Einsteiger-Tipps.
+- **Anzeige:** Einheit km/h oder mph, FPS-Anzeige, Tastenhinweise.
 - **Barrierefreiheit:** Textgröße (Normal, Groß, Sehr groß), hoher Kontrast, weniger Bewegung (kein Kamerawackeln,
   keine Tempo-Effekte, keine Animationen) und eine farbenblind-freundliche Palette. Die Power-ups unterscheiden sich
   außerdem in der Form, nicht nur in der Farbe.
@@ -78,11 +80,14 @@ Einstellungen gehören zum Gerät und werden nicht mit der Cloud synchronisiert.
 ## Online mit Freunden
 
 - **Rangliste:** Allzeit, diese Woche, heute und **unter Freunden**.
-- **Freunde:** Unter *Rangliste → Freunde* steht dein Freundescode (6 Zeichen). Wer ihn eingibt oder deinen Link
+- **Freunde:** Eigene Kachel im Hauptmenü. Dort steht dein Freundescode (6 Zeichen). Wer ihn eingibt oder deinen Link
   (`?friend=CODE`) öffnet, ist gegenseitig mit dir verbunden – ihr seht Namen und Rekorde des anderen. Höchstens
   50 Freunde, jederzeit entfernbar. Der Code verrät nur, was ohnehin in der weltweiten Rangliste steht.
 - **Tagesrennen:** Jeden Tag gibt es eine Strecke (gleicher Seed für alle Spieler weltweit). Dein bester
   Versuch des Tages zählt für die Tagesrangliste.
+- **Party bleibt bestehen:** Das Spiel merkt sich deine letzte Party (14 Tage) und tritt beim nächsten Start
+  automatisch wieder bei – auch nach Neuladen oder Schließen des Tabs. Nur „Party verlassen“ beendet das.
+  In der Lobby gibt es bei jedem Mitspieler einen **„Freund“-Knopf**.
 - **Party:** „Party erstellen“ drücken und den Link verschicken. Wer ihn öffnet, ist dabei. Du siehst die Autos
   deiner Freunde als Geister auf deiner Straße und ihren Stand im HUD. Der Host startet gemeinsame Rennen,
   bei denen alle **denselben Verkehr** bekommen.
@@ -163,7 +168,7 @@ js/
   config.js     Alle Stellschrauben: Tempo, Schwierigkeit, Autos, Welten, Missionen
   bend.js       Kurven und Hügel (gebogene Welt im Vertex-Shader)
   tutorial.js   Tipps der ersten Runde (reine Logik)
-  friends.js    Freunde: Code, Hinzufügen, Freunde-Rangliste
+  friends.js    Freunde: Code, Hinzufügen, Freunde-Rangliste (auch aus der Party heraus)
   cloud.js      Cloud-Spielstand und Sicherungscode
   input.js      Tastatur und Touch-Knöpfe
   clipboard.js  Kopieren in die Zwischenablage

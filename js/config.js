@@ -3,7 +3,7 @@
  * Einheiten: Meter, Sekunden, m/s (× 3,6 = km/h). Fahrtrichtung = -z.
  */
 
-export const VERSION = '2.3.0';
+export const VERSION = '2.4.0';
 
 // Öffentliche Supabase-Zugangsdaten (Publishable Key darf im Browser stehen –
 // geschützt wird über Row Level Security und geprüfte Server-Funktionen).
@@ -382,6 +382,7 @@ export const DEFAULT_SETTINGS = {
   autoPause: true,
   // Spiel
   difficulty: 'normal',
+  hints: 'few',
   // Barrierefreiheit
   contrast: false,
   textSize: 'normal',
@@ -428,16 +429,21 @@ export const SETTINGS_GROUPS = [
         desc: 'Gilt für normale Runden. Entspannt zählt nicht für Rekord und Rangliste (Münzen ×0,75), Hardcore bringt ×1,25 Münzen. Tagesrennen, Party und Herausforderungen sind immer Normal.',
         options: [['easy', 'Entspannt'], ['normal', 'Normal'], ['hard', 'Hardcore']],
       },
+      {
+        key: 'hints', type: 'seg', label: 'Hinweise im Spiel',
+        desc: 'Wie viele Einblendungen während der Fahrt erscheinen. Missionen und Erfolge gibt es am Rundenende.',
+        options: [['off', 'Keine'], ['few', 'Wenige'], ['all', 'Alle']],
+      },
+      { key: 'autoPause', type: 'switch', label: 'Automatisch pausieren', desc: 'Das Spiel hält an, wenn du das Fenster verlässt' },
+      { key: 'vibrate', type: 'switch', label: 'Vibration', desc: 'Handy vibriert bei Crash, Nitro und Rammen' },
     ],
   },
   {
     id: 'display',
-    title: 'Anzeige und Steuerung',
+    title: 'Anzeige',
     items: [
       { key: 'unit', type: 'seg', label: 'Tempo-Einheit', options: [['kmh', 'km/h'], ['mph', 'mph']] },
       { key: 'keyHints', type: 'switch', label: 'Tastenhinweise', desc: 'Tipps zu den Tasten im Menü und während der Fahrt' },
-      { key: 'autoPause', type: 'switch', label: 'Automatisch pausieren', desc: 'Das Spiel hält an, wenn du das Fenster verlässt' },
-      { key: 'vibrate', type: 'switch', label: 'Vibration', desc: 'Handy vibriert bei Crash, Nitro und Rammen' },
     ],
   },
   {

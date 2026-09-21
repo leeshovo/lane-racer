@@ -88,7 +88,7 @@ const ctx = {
   get ui() { return ui; },
   get game() { return game; },
   ensureRegistered: () => ensureRegistered(),
-  leaveParty: () => leaveParty(),
+  leaveParty: () => leaveParty({ forget: true }),
   refreshScreens: () => {
     renderTopBar();
     renderMenu();
@@ -136,13 +136,15 @@ const ui = new UI({
     onLeaderboardTab: (kind) => loadLeaderboard(kind),
     onCreateParty: () => joinParty(generatePartyCode()),
     onJoinParty: (code) => joinParty(code),
-    onLeaveParty: () => leaveParty(),
+    onLeaveParty: () => leaveParty({ forget: true }),
     onStartRace: () => app.party?.isHost && app.party.startRace(),
     onCopyInvite: () => copyInvite(),
     onShareInvite: () => shareInvite(),
     onEmote: (emoji) => app.party?.sendEmote(emoji),
     onChat: (id) => app.party?.sendChat(id),
     onFriendAdd: (code) => friends.add(code),
+    onPartyFriend: (code) => friends.addFromParty(code),
+    onOpenFriends: () => openFriends(),
     onFriendCopy: () => friends.copyLink(),
     onFriendShare: () => friends.shareLink(),
     onFriendRemove: (id) => friends.remove(id),
@@ -169,7 +171,7 @@ function detectQuality() {
   return 'high';
 }
 const quality = profile.settings.quality === 'auto' ? detectQuality() : profile.settings.quality;
-const MAX_PIXEL_RATIO = quality === 'low' ? 1 : quality === 'medium' ? 1.5 : 2;
+const MAX_PIXEL_RATIO = quality === 'low' ? 1 : quality === 'medium' ? 1.25 : 1.5;
 let pixelRatio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
 
 function boot() {
@@ -224,6 +226,7 @@ function boot() {
       await cloud.pull();
       if (app.pendingFriend) friends.acceptLink();
       if (app.pendingParty) joinParty(app.pendingParty);
+      else if (profile.lastParty && !app.party) joinParty(profile.lastParty.code, { silent: true }); // Party bleibt bestehen
     }
   });
 
@@ -261,7 +264,7 @@ let worldDistance = 0;
 let liveCache = null;
 let liveCacheAt = 0;
 let structureStyleKey = '';
-const perf = { sum: 0, frames: 0, slowFor: 0 };
+const perf = { sum: 0, frames: 0, slowFor: 0, step: 0 };
 
 function frame(now) {
   requestAnimationFrame(frame);
@@ -325,21 +328,41 @@ function frame(now) {
 }
 
 /** Senkt die Auflösung, wenn das Gerät dauerhaft nicht mitkommt. */
+/**
+ * Automatische Leistungsanpassung: Wird die Fahrt zu ruckelig (unter ~48 Bilder pro Sekunde), schaltet das Spiel
+ * Schritt für Schritt Aufwand ab – zuerst Auflösung, dann Leuchteffekt, dann Schatten. Nach jedem Schritt wird
+ * wieder gemessen. Rückwärts geht es bewusst nicht (sonst würde das Bild ständig hin- und herspringen).
+ */
+const PERF_STEPS = [
+  () => setResolution(Math.min(pixelRatio, 1.25)),
+  () => setResolution(Math.min(pixelRatio, 1)),
+  () => effects.setBloomEnabled(false),
+  () => world.setShadowsEnabled(false),
+  () => setResolution(Math.min(pixelRatio, 0.85)),
+  () => setResolution(Math.min(pixelRatio, 0.7)),
+];
+
+function setResolution(ratio) {
+  if (ratio === pixelRatio) return;
+  pixelRatio = ratio;
+  renderer.setPixelRatio(pixelRatio);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  effects.setSize(window.innerWidth, window.innerHeight);
+}
+
 function governPerformance(dt, inRun) {
-  if (!inRun || app.paused) return;
+  if (!inRun || app.paused || profile.settings.quality === 'high') return; // "Hoch" bleibt, wie es ist
   perf.sum += dt;
   perf.frames += 1;
-  if (perf.sum < 2) return;
+  if (perf.sum < 1.5) return;
   const avg = perf.sum / perf.frames;
   perf.sum = 0;
   perf.frames = 0;
-  if (avg > 1 / 42 && pixelRatio > 0.75) {
+  if (avg > 1 / 48 && perf.step < PERF_STEPS.length) {
     perf.slowFor += 1;
     if (perf.slowFor >= 2) {
-      pixelRatio = Math.max(0.75, pixelRatio - 0.25);
-      renderer.setPixelRatio(pixelRatio);
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      effects.setSize(window.innerWidth, window.innerHeight);
+      PERF_STEPS[perf.step]();
+      perf.step += 1;
       perf.slowFor = 0;
     }
   } else {
@@ -459,6 +482,7 @@ function renderMenu() {
     car: selectedCarOf(profile),
     missions: profile.missions,
     party: app.party ? { code: app.partyCode, memberCount: app.party.members.length } : null,
+    rejoin: !app.party && profile.lastParty ? profile.lastParty.code : '',
     daily: dailyMenuText(),
   });
 }
@@ -531,9 +555,15 @@ function purchaseCar(carId) {
 
 /** Toast für jeden neu geschafften Erfolg. */
 function announceAchievements(list) {
-  for (const a of list) {
+  if (list.length === 1) {
+    const a = list[0];
     const extra = a.color ? ` · Neuer Lack: ${SPECIAL_COLORS[a.color].name}` : '';
     ui.toast(`Erfolg: ${a.name}`, `${a.text}  +${a.reward} Münzen${extra}`, 'mission');
+  } else if (list.length > 1) {
+    // Mehrere auf einmal (z. B. nach dem Update): eine Meldung statt eines Stapels
+    const coins = list.reduce((sum, a) => sum + a.reward, 0);
+    const colors = list.filter((a) => a.color).map((a) => SPECIAL_COLORS[a.color].name);
+    ui.toast(`${list.length} Erfolge freigeschaltet`, `+${coins} Münzen${colors.length ? ` · Neuer Lack: ${colors.join(', ')}` : ''} – Details unter Missionen`, 'mission');
   }
   if (list.length) {
     audio.play('mission');
@@ -670,6 +700,11 @@ function vibrate(pattern) {
 // ---------------------------------------------------------------------------
 // Ranglisten
 // ---------------------------------------------------------------------------
+async function openFriends() {
+  setScreen('leaderboard');
+  loadLeaderboard('friends');
+}
+
 async function openLeaderboard() {
   setScreen('leaderboard');
   loadLeaderboard(app.party ? 'party' : 'global');
@@ -748,6 +783,7 @@ async function submitName(raw) {
 function me() {
   return {
     id: profile.online?.id,
+    fc: app.friendCode || '',
     name: profile.name || 'Gast',
     car: profile.selectedCar,
     color: colorOf(profile, profile.selectedCar),
@@ -779,7 +815,7 @@ function renderParty(extra = {}) {
   });
 }
 
-async function joinParty(rawCode) {
+async function joinParty(rawCode, { silent = false } = {}) {
   const code = normalizePartyCode(rawCode);
   app.pendingParty = null;
   if (!code) {
@@ -789,7 +825,7 @@ async function joinParty(rawCode) {
   }
   if (app.party) {
     if (app.partyCode === code) return openParty();
-    await leaveParty();
+    await leaveParty(); // wechseln: die neue Party wird unten gemerkt
   }
   if (!profile.name) {
     app.pendingParty = code;
@@ -800,12 +836,16 @@ async function joinParty(rawCode) {
     app.partyError = 'Für die Party brauchst du eine Internetverbindung. Versuch es gleich noch mal.';
     app.pendingParty = code;
     if (app.screen === 'party') renderParty();
-    else ui.toast('Party nicht erreichbar', 'Keine Verbindung zum Server.', 'error');
+    else if (!silent) ui.toast('Party nicht erreichbar', 'Keine Verbindung zum Server.', 'error');
     return;
   }
 
   app.partyError = null;
   if (app.screen === 'party') renderParty({ phase: 'joining', code });
+  if (!app.friendCode) {
+    const fc = await online.friendCode(profile.online);
+    if (fc.code) app.friendCode = fc.code;
+  }
   const party = await online.joinParty(code, me());
   if (!party || party.error) {
     app.partyError = party?.error || 'Beitritt fehlgeschlagen.';
@@ -816,6 +856,8 @@ async function joinParty(rawCode) {
   app.party = party;
   app.partyCode = code;
   app.knownMembers = new Set([profile.online.id]);
+  profile.lastParty = { code, at: Date.now() };
+  saveProfile(profile);
   try {
     history.replaceState(null, '', partyShareUrl(code));
   } catch (err) { /* z. B. file:// – egal */ }
@@ -840,7 +882,8 @@ async function joinParty(rawCode) {
 
   setScreen(app.screen); // Status an die Party melden
   audio.play('join');
-  ui.toast('Party beigetreten', `Code ${code} – schick den Link an deine Freunde!`, 'party');
+  if (silent) ui.toast('Wieder in der Party', `Code ${code}`, 'party');
+  else ui.toast('Party beigetreten', `Code ${code} – schick den Link an deine Freunde!`, 'party');
   renderTopBar();
   renderMenu();
   if (app.screen === 'party' || app.screen === 'menu') openParty();
@@ -863,7 +906,12 @@ function onPartyMembers(members) {
   if (app.screen === 'gameover' && app.race) ui.updateGameOver({ race: raceView() });
 }
 
-async function leaveParty() {
+/** forget = die Party bewusst verlassen (sonst merkt sich das Spiel sie und tritt beim nächsten Start wieder bei). */
+async function leaveParty({ forget = false } = {}) {
+  if (forget) {
+    profile.lastParty = null;
+    saveProfile(profile);
+  }
   const party = app.party;
   app.party = null;
   app.partyCode = null;

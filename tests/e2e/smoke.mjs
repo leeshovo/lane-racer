@@ -107,6 +107,10 @@ try {
   await page.evaluate(() => [...document.querySelectorAll('[data-group="access"] .seg__btn')].find((b) => /groß/i.test(b.textContent) && !/sehr/i.test(b.textContent)).click());
   check(await page.evaluate(() => document.documentElement.classList.contains('text-large')), 'Textgröße "Groß" wirkt');
   await page.evaluate(() => [...document.querySelectorAll('[data-group="access"] .seg__btn')].find((b) => /^normal$/i.test(b.textContent.trim())).click());
+  const tabs = await page.evaluate(() => [...document.querySelectorAll('.tabs--settings .tab')].map((t) => t.textContent.trim()).join());
+  check(tabs === 'Ton,Grafik,Spiel,Anzeige,Steuerung,Konto', `Einstellungs-Reiter: ${tabs}`);
+  await page.evaluate(() => document.getElementById('lr-set-tab-graphics').click());
+  check(await page.evaluate(() => document.getElementById('lr-set-panel-graphics').hidden === false && document.getElementById('lr-set-panel-sound').hidden === true), 'Reiter Grafik zeigt nur die Grafik-Einstellungen');
   await clickText('^\\s*zurück');
   await page.waitForFunction(() => window.laneRacer.app.screen === 'menu');
 
@@ -118,6 +122,9 @@ try {
   check(true, 'Auto fährt (Strecke wächst)');
   const tip = await page.evaluate(() => { const t = document.querySelector('.tip'); return t && !t.hidden ? t.textContent : ''; });
   check(/Spur/.test(tip), `Einsteiger-Tipp sichtbar: "${tip.slice(0, 50)}"`);
+  const toastsBefore = await page.evaluate(() => document.querySelectorAll('.toast').length);
+  await page.evaluate(() => { window.laneRacer.ui.toast('Level 9', 'Test', 'level'); window.laneRacer.ui.popup('KNAPP', 'near'); });
+  check(await page.evaluate((n) => document.querySelectorAll('.toast').length === n, toastsBefore), 'Im Spiel keine Level-Meldung (Hinweise: Wenige)');
   await page.keyboard.press('ArrowLeft');
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('p');

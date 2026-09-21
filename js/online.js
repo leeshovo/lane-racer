@@ -991,6 +991,7 @@ function sanitizeRaceRows(data) {
 function makeMember(p, isMe) {
   return {
     id: p.id,
+    fc: p.fc || '', // Freundescode (öffentlich, für "Freund hinzufügen" in der Lobby)
     name: p.name,
     car: p.car,
     color: p.color,
@@ -1029,6 +1030,7 @@ function sanitizePresence(key, raw) {
   const joinedAt = strictNum(raw.joinedAt);
   return {
     id,
+    fc: normalizeFriendCode(raw.fc) || '',
     name: cleanName(raw.name),
     car: cleanCar(raw.car),
     color: cleanColor(raw.color),
@@ -1059,6 +1061,7 @@ export class Party {
     const id = cleanId(src.id) || guestId();
     this._me = makeMember({
       id,
+      fc: normalizeFriendCode(src.fc) || '',
       name: cleanName(src.name),
       car: cleanCar(src.car),
       color: cleanColor(src.color, CARS[0].colors[0]),
@@ -1532,7 +1535,7 @@ export class Party {
 
   _presencePayload() {
     const m = this._me;
-    return { id: m.id, name: m.name, car: m.car, color: m.color, best: m.best, status: m.status, joinedAt: m.joinedAt };
+    return { id: m.id, fc: m.fc, name: m.name, car: m.car, color: m.color, best: m.best, status: m.status, joinedAt: m.joinedAt };
   }
 
   _trackNow() {
@@ -1591,6 +1594,7 @@ export class Party {
           this._meta.get(p.id).statusSince = t;
         }
         m.name = p.name;
+        m.fc = p.fc;
         m.car = p.car;
         m.color = p.color;
         m.best = p.best;

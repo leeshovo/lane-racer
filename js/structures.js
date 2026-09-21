@@ -194,13 +194,13 @@ export class Structures {
       this.tunnelSegments.setMatrixAt(i, m);
       this.tunnelLights.setMatrixAt(i, m);
     }
-    this.tunnelSegments.castShadow = quality !== 'low';
+    this.tunnelSegments.castShadow = false;
     for (const mesh of [this.tunnelSegments, this.tunnelLights]) mesh.frustumCulled = false;
 
     this.portalGeometry = portalGeometry();
     this.portalNear = new THREE.Mesh(this.portalGeometry, concrete);
     this.portalFar = new THREE.Mesh(this.portalGeometry, concrete);
-    this.portalNear.castShadow = this.portalFar.castShadow = quality !== 'low';
+    this.portalNear.castShadow = this.portalFar.castShadow = false;
 
     // Hügel über dem Tunnel: langer Halbrund-Körper (Querschnitt = obere Hälfte einer Ellipse), Länge 1 von z = 0 bis z = −1.
     // Er ist überall höher als die Tunneldecke und endet bündig an den Portalen – so bleibt die Straße davor frei.
@@ -244,7 +244,7 @@ export class Structures {
     const cables = new THREE.Mesh(bridge.cables, this.cableMaterial);
     const glow = new THREE.Mesh(bridge.glow, this.glowMaterial);
     for (const mesh of [steel, cables, glow]) mesh.frustumCulled = false;
-    steel.castShadow = cables.castShadow = quality !== 'low';
+    steel.castShadow = cables.castShadow = false;
     this.bridge.add(steel, cables, glow);
     this.bridge.visible = false;
     this.root.add(this.bridge);

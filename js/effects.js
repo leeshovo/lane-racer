@@ -110,7 +110,22 @@ export class Effects {
   #applyComposerScale() {
     if (!this.composer) return;
     const base = this.renderer.getPixelRatio();
-    this.composer.setPixelRatio(this.quality === 'medium' ? base * 0.7 : base);
+    this._composerRatio = this.quality === 'medium' ? base * 0.7 : base;
+    this.composer.setPixelRatio(this._composerRatio);
+    this.#sizeBloom();
+  }
+
+  /** Bloom rechnet nur mit halber Auflösung – das Glühen ist ohnehin weich. */
+  #sizeBloom() {
+    if (!this.bloomPass) return;
+    const size = this.renderer.getSize(new THREE.Vector2());
+    const ratio = this._composerRatio || this.renderer.getPixelRatio();
+    this.bloomPass.setSize(Math.max(2, Math.round(size.x * ratio * 0.5)), Math.max(2, Math.round(size.y * ratio * 0.5)));
+  }
+
+  /** Leuchteffekt komplett abschalten (automatische Leistungsanpassung). */
+  setBloomEnabled(on) {
+    if (this.bloomPass) this.bloomPass.enabled = Boolean(on);
   }
 
   #createParticles() {
@@ -231,7 +246,6 @@ export class Effects {
 
   setSize(width, height) {
     this.composer?.setSize(width, height);
-    this.bloomPass?.setSize(width, height);
     this.#applyComposerScale();
   }
 

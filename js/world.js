@@ -56,9 +56,11 @@ const W_Z_FRONT = -86;
 const W_Z_SPAN = W_Z_BACK - W_Z_FRONT;
 
 const QUALITY_PRESETS = {
-  high:   { shadow: 2048, aniso: 8, density: 1.0,  points: 900, rain: 800, stars: 900 },
-  medium: { shadow: 1024, aniso: 4, density: 0.68, points: 480, rain: 420, stars: 560 },
-  low:    { shadow: 0,    aniso: 1, density: 0.42, points: 220, rain: 190, stars: 320 },
+  // Schatten: nur Fahrzeuge werfen welche (Deko-Pools würden jede Instanz erneut zeichnen). Die Karte deckt nur
+  // 44 × 68 m rund ums Auto ab – 1024 px reichen dafür scharf genug.
+  high:   { shadow: 1024, aniso: 8, density: 0.8,  points: 700, rain: 700, stars: 700 },
+  medium: { shadow: 512,  aniso: 4, density: 0.55, points: 420, rain: 380, stars: 480 },
+  low:    { shadow: 0,    aniso: 1, density: 0.4,  points: 220, rain: 190, stars: 320 },
 };
 
 // ---------------------------------------------------------------------------
@@ -1162,9 +1164,15 @@ export class World {
     this.root.add(this.ambient, this.hemi, this.sun, this.sunTarget);
   }
 
+  /** Schatten der Sonne ein-/ausschalten (für die automatische Leistungsanpassung; kein Shader-Neubau nötig). */
+  setShadowsEnabled(on) {
+    this._shadowsWanted = Boolean(on);
+    this.sun.castShadow = this._shadowsWanted && this.q.shadow > 0;
+  }
+
   _applyShadowQuality() {
     const size = this.q.shadow;
-    this.sun.castShadow = size > 0;
+    this.sun.castShadow = size > 0 && this._shadowsWanted !== false;
     if (size > 0) {
       this.sun.shadow.mapSize.set(size, size);
       if (this.sun.shadow.map && this.sun.shadow.map.width !== size) {
@@ -1274,7 +1282,7 @@ export class World {
     });
     this.rails = new THREE.InstancedMesh(railGeo, this.railMat, RAIL_SLOTS * 2);
     this.rails.frustumCulled = false;
-    this.rails.castShadow = this.q.shadow > 0;
+    this.rails.castShadow = false;
     this.rails.receiveShadow = false;
     this.rails.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.root.add(this.rails);
@@ -1291,7 +1299,7 @@ export class World {
     });
     this.lampMasts = new THREE.InstancedMesh(mastGeo, this.mastMat, LAMP_SLOTS * 2);
     this.lampMasts.frustumCulled = false;
-    this.lampMasts.castShadow = this.q.shadow > 0;
+    this.lampMasts.castShadow = false;
     this.lampMasts.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.root.add(this.lampMasts);
     this._disposables.push(mastGeo, this.mastMat);
@@ -1341,7 +1349,7 @@ export class World {
   _addPool(key, geometry, material, capacity, { shadow = false } = {}) {
     const mesh = new THREE.InstancedMesh(geometry, material, capacity);
     mesh.frustumCulled = false;
-    mesh.castShadow = shadow && this.q.shadow > 0;
+    mesh.castShadow = false; // Deko wirft keinen Schatten (siehe QUALITY_PRESETS)
     mesh.receiveShadow = false;
     mesh.visible = false;
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -1968,9 +1976,9 @@ export class World {
 
     this._applyShadowQuality();
     const shadows = this.q.shadow > 0;
-    this.rails.castShadow = shadows;
-    this.lampMasts.castShadow = shadows;
-    for (const pool of this.pools.values()) pool.mesh.castShadow = pool.wantsShadow && shadows;
+    this.rails.castShadow = false;
+    this.lampMasts.castShadow = false;
+    for (const pool of this.pools.values()) pool.mesh.castShadow = false;
 
     const aniso = Math.min(this.q.aniso, this.renderer?.capabilities?.getMaxAnisotropy?.() ?? 8);
     for (const t of [...this.roadTex, ...this.groundTex, ...this.overlayTex]) {

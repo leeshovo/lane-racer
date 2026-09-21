@@ -11,6 +11,7 @@ import {
 } from './config.js';
 
 const KEY = 'laneRacer2.profile';
+export const PARTY_MEMORY_MS = 14 * 24 * 3600 * 1000; // so lange merkt sich das Spiel die letzte Party
 const ACTIVE_MISSIONS = 3;
 
 export function defaultProfile() {
@@ -33,6 +34,7 @@ export function defaultProfile() {
     daily: { key: '', best: 0 }, // bester Versuch im Tagesrennen des Tages "key" (YYYYMMDD)
     settings: { ...DEFAULT_SETTINGS },
     tutorialDone: false, // Tipps in der ersten Runde schon gesehen?
+    lastParty: null,     // { code, at } – die Party, in der man zuletzt war (wird beim Start wieder betreten)
     online: null, // { id, secret } nach der Registrierung
   };
 }
@@ -48,6 +50,10 @@ function normalize(stored) {
   p.settings = sanitizeSettings(stored.settings);
   // Wer schon gespielt hat, braucht kein Tutorial mehr
   p.tutorialDone = typeof stored.tutorialDone === 'boolean' ? stored.tutorialDone : Number(stored.stats && stored.stats.runs) > 0;
+  const lp = stored.lastParty;
+  p.lastParty = lp && typeof lp.code === 'string' && /^[A-Z0-9]{4,8}$/.test(lp.code) && Number.isFinite(lp.at) && Date.now() - lp.at < PARTY_MEMORY_MS
+    ? { code: lp.code, at: lp.at }
+    : null;
   p.colors = { ...base.colors, ...(stored.colors || {}) };
   p.achievements = {};
   const known = new Set(ACHIEVEMENTS.map((a) => a.id));
@@ -131,6 +137,7 @@ export function adoptSnapshot(profile, data) {
     online: profile.online,
     daily: profile.daily,
     tutorialDone: profile.tutorialDone,
+    lastParty: profile.lastParty,
   });
   Object.assign(profile, merged);
   return profile;

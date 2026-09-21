@@ -91,7 +91,7 @@ export class UI {
    *   onOpenMissions, onOpenSettings, onBack, onPreviewCar, onBuyCar, onSelectCar,
    *   onSelectColor, onSubmitName, onRename, onLeaderboardTab, onCreateParty,
    *   onJoinParty, onLeaveParty, onStartRace, onCopyInvite, onShareInvite, onEmote, onChat,
-   *   onFriendAdd, onFriendCopy, onFriendShare, onFriendRemove,
+   *   onFriendAdd, onFriendCopy, onFriendShare, onFriendRemove, onOpenFriends, onPartyFriend,
    *   onSettingsChange, onPause, onResume, onRestart, onToMenu, onTouch, onUiSound
    */
   constructor({ root, callbacks } = {}) {
@@ -233,7 +233,7 @@ export class UI {
   }
 
   /** Hauptmenü: Rekord, gewähltes Auto, 3 Missionen, Party-Hinweis. */
-  renderMenu({ best = 0, car = null, missions = [], party = null, daily = null } = {}) {
+  renderMenu({ best = 0, car = null, missions = [], party = null, daily = null, rejoin = '' } = {}) {
     const m = this.mn;
     m.best.set(best);
     const c = car && typeof car === 'object' ? car : null;
@@ -254,7 +254,7 @@ export class UI {
       m.partyCode.textContent = code;
       m.partyCount.textContent = `${count} ${count === 1 ? 'Fahrer' : 'Fahrer'} · Lobby öffnen`;
     }
-    m.partySub.textContent = code ? `Party ${code}` : 'mit Freunden';
+    m.partySub.textContent = code ? `Party ${code}` : (rejoin ? `Zurück zu ${rejoin}` : 'mit Freunden');
     if (typeof daily === 'string') m.dailySub.textContent = cleanText(daily, 40);
     m.bestTicker.textContent = best > 0 ? `Dein Rekord: ${fmtDist(best)} – schaffst du mehr?` : 'Noch kein Rekord – zeig, was du kannst';
   }
@@ -734,6 +734,7 @@ export class UI {
   popup(text, kind = 'near') {
     const p = this.pp;
     const k = POPUP_KINDS.has(kind) ? kind : 'near';
+    if (!this._hintAllowed('popup', k)) return;
     const now = performance.now();
     // Kommen mehrere kurz hintereinander, stapeln sie sich nach oben
     p.stack = now - p.lastAt < 420 ? Math.min(p.stack + 1, 3) : 0;
@@ -759,8 +760,24 @@ export class UI {
   }
 
   /** Gestapelte Einblendung oben, verschwindet von allein. */
+  /**
+   * Was darf während der Fahrt eingeblendet werden? (Einstellung "Hinweise im Spiel")
+   *   Keine  = nichts, Wenige = nur Warnungen und Weltwechsel, Alle = wie früher.
+   * Außerhalb der Fahrt (Menüs, Rundenende) wird nie gefiltert.
+   */
+  _hintAllowed(type, kind) {
+    if (this.screen !== 'hud') return true;
+    const mode = this._settings.hints || 'few';
+    if (mode === 'all') return true;
+    if (mode === 'off') return false;
+    if (type === 'toast') return kind === 'error' || kind === 'world';
+    if (type === 'popup') return kind === 'combo';
+    return false;
+  }
+
   toast(title, subtitle = '', kind = 'info') {
     const k = TOAST_KINDS.has(kind) ? kind : 'info';
+    if (!this._hintAllowed('toast', k)) return;
     const titleText = cleanText(title, 80);
     const subText = cleanText(subtitle, 160);
     const el = h('div', { class: `toast toast--${k}` },
@@ -772,14 +789,17 @@ export class UI {
         subText ? h('span', { class: 'toast__sub' }, subText) : null));
     const box = this.toastBox;
     box.prepend(el);
-    // Höchstens 4 gleichzeitig – die ältesten fliegen raus
-    while (box.children.length > 4) box.lastElementChild.remove();
+    // Höchstens 3 gleichzeitig – die ältesten fliegen raus
+    while (box.children.length > 3) box.lastElementChild.remove();
     const ttl = k === 'error' ? 5200 : k === 'world' ? 4200 : 3200;
     setTimeout(() => this._dismissToast(el), ttl);
   }
 
   /** Vollbild-Blitz (Crash rot, Schild grün, Nitro cyan …). */
   flash(color = 'red') {
+    // Bunte Bildschirmblitze nur bei "Alle"; der rote Crash-Blitz bleibt immer
+    const isCrash = String(color).toLowerCase() === '#ff3b4e' || String(color).toLowerCase() === 'red' || String(color).toLowerCase() === 'crash';
+    if (!isCrash && !this._hintAllowed('flash', 'flash')) return;
     let c = FLASH_COLORS[String(color).toLowerCase()];
     if (!c) c = typeof color === 'string' && (COLOR_RE.test(color) || /^#[0-9a-f]{3}$/i.test(color)) ? color : FLASH_COLORS.red;
     const f = this.fl;
@@ -1312,7 +1332,7 @@ export class UI {
     const text = h('p', { class: 'loading__text', role: 'status' }, 'Lädt …');
     this._screen('loading', h('div', { class: 'loading' },
       h('div', { class: 'logo logo--center', 'aria-hidden': 'true' },
-        h('span', { class: 'logo__lane' }, 'Lane'), h('span', { class: 'logo__racer' }, 'Racer'), h('span', { class: 'logo__ver' }, '2.0')),
+        h('span', { class: 'logo__lane' }, 'Lane'), h('span', { class: 'logo__racer' }, 'Racer'), h('span', { class: 'logo__ver' }, VERSION.split('.').slice(0, 2).join('.'))),
       h('div', { class: 'loading__bar', 'aria-hidden': 'true' }, h('i')),
       text));
     this.ld = { text };
@@ -1326,7 +1346,7 @@ export class UI {
     const logo = h('h1', { class: 'logo', id: 'lr-menu-title', tabindex: '-1' },
       h('span', { class: 'logo__lane' }, 'Lane'),
       h('span', { class: 'logo__racer' }, 'Racer'),
-      h('span', { class: 'logo__ver' }, '2.0'));
+      h('span', { class: 'logo__ver' }, VERSION.split('.').slice(0, 2).join('.')));
     this.focusTargets.menu = logo;
 
     m.best = new Digits('meta__num');
@@ -1350,13 +1370,14 @@ export class UI {
     const garage = navBtn('car', 'Garage', 'Autos & Lacke', 'onOpenGarage');
     const board = navBtn('trophy', 'Rangliste', 'Weltweit & Woche', 'onOpenLeaderboard');
     const party = navBtn('users', 'Party', 'mit Freunden', 'onOpenParty', 'navbtn--party');
+    const friends = navBtn('users', 'Freunde', 'Code & Rangliste', 'onOpenFriends', 'navbtn--friends');
     const daily = navBtn('flag', 'Tagesrennen', 'Neue Strecke jeden Tag', 'onOpenDaily', 'navbtn--daily');
     m.dailySub = daily.subEl;
     const missions = navBtn('target', 'Missionen', 'Münzen verdienen', 'onOpenMissions');
     const settings = navBtn('sliders', 'Einstellungen', 'Sound & Grafik', 'onOpenSettings');
     m.partySub = party.subEl;
     const nav = h('nav', { class: 'menu__nav', 'aria-label': 'Hauptmenü' },
-      daily.btn, party.btn, garage.btn, board.btn, missions.btn, settings.btn);
+      daily.btn, party.btn, friends.btn, garage.btn, board.btn, missions.btn, settings.btn);
 
     m.partyCode = h('strong', { class: 'party-badge__code' });
     m.partyCount = h('span', { class: 'party-badge__count' });
@@ -1395,7 +1416,7 @@ export class UI {
     const tickerItems = () => TICKER_TIPS.map((t) => h('span', { class: 'ticker__item' }, t));
     const track = h('div', { class: 'ticker__track' },
       h('div', { class: 'ticker__group' }, m.bestTicker, tickerItems()),
-      h('div', { class: 'ticker__group', 'aria-hidden': 'true' }, h('span', { class: 'ticker__item' }, 'Lane Racer 2.0'), tickerItems()));
+      h('div', { class: 'ticker__group', 'aria-hidden': 'true' }, h('span', { class: 'ticker__item' }, `Lane Racer ${VERSION}`), tickerItems()));
     const ticker = h('div', { class: 'ticker', role: 'marquee', 'aria-label': 'Tipps' },
       h('span', { class: 'ticker__tag' }, h('i', { class: 'live__rec', 'aria-hidden': 'true' }), 'Tipps'),
       h('div', { class: 'ticker__viewport' }, track));
@@ -1981,11 +2002,15 @@ export class UI {
     const you = h('span', { class: 'tag tag--me', hidden: true }, 'Du');
     const sub = h('span', { class: 'member__sub' });
     const chip = h('span', { class: 'status-chip' });
-    const li = h('li', { class: 'member' },
+    const add = h('button', { type: 'button', class: 'member__add', hidden: true, title: 'Als Freund hinzufügen' }, icon('users'), h('span', null, 'Freund'));
+    const row = { li: null, name, crown, you, sub, chip, add, fc: '', k: '' };
+    add.addEventListener('click', () => { if (row.fc) this._call('onPartyFriend', row.fc); });
+    row.li = h('li', { class: 'member' },
       h('i', { class: 'member__dot', 'aria-hidden': 'true' }),
       h('span', { class: 'member__main' }, h('span', { class: 'member__line' }, name, crown, you), sub),
+      add,
       chip);
-    return { li, name, crown, you, sub, chip, k: '' };
+    return row;
   }
 
   _updateMemberRow(row, m) {
@@ -1993,9 +2018,11 @@ export class UI {
     const [kind, label] = this._memberStatus(m);
     const sub = `${carName(m.car) || 'Auto'} · Rekord ${fmtDist(m.best)}`;
     const color = safeColor(m.color, TEAL);
-    const key = `${name}|${kind}|${label}|${sub}|${color}|${!!m.isHost}|${!!m.isMe}`;
+    const key = `${name}|${kind}|${label}|${sub}|${color}|${!!m.isHost}|${!!m.isMe}|${m.fc || ''}`;
     if (key === row.k) return;
     row.k = key;
+    row.fc = !m.isMe && typeof m.fc === 'string' && /^[A-HJ-NP-Z2-9]{6}$/.test(m.fc) ? m.fc : '';
+    row.add.hidden = !row.fc;
     row.name.textContent = name;
     row.sub.textContent = sub;
     row.chip.textContent = label;
@@ -2101,6 +2128,21 @@ export class UI {
   // =========================================================================
   // Aufbau: Einstellungen
   // =========================================================================
+  /** Reiter der Einstellungen wechseln (merkt sich die Wahl, auch nach dem Schließen). */
+  _selectSettingsTab(id) {
+    const st = this.st;
+    const tab = st.tabs.find((t) => t.id === id) || st.tabs[0];
+    for (const t of st.tabs) {
+      const on = t === tab;
+      t.panel.hidden = !on;
+      t.btn.setAttribute('aria-selected', on ? 'true' : 'false');
+      t.btn.tabIndex = on ? 0 : -1;
+    }
+    st.active = tab.id;
+    this._settingsTab = tab.id;
+    st.body.scrollTop = 0;
+  }
+
   _buildSettings() {
     const st = { rows: {} };
     const change = (partial) => this._call('onSettingsChange', partial);
@@ -2217,16 +2259,51 @@ export class UI {
       h('button', { type: 'button', class: 'btn btn--ghost btn--sm', onClick: () => this._call('onReplayTutorial') },
         icon('info'), h('span', { class: 'btn__label' }, 'Tipps zeigen')));
 
-    this._sheet('settings', { kicker: 'Optionen', title: 'Einstellungen' },
-      h('div', { class: 'sheet__body' },
-        groups,
-        h('div', { class: 'settings-group' }, tutorialRow),
-        h('div', { class: 'settings-group' }, nameRow),
-        h('div', { class: 'settings-group' }, cloudRow),
-        h('div', { class: 'settings-group' }, controls),
-        h('div', { class: 'settings-group' }, resetRow),
-        h('p', { class: 'version' }, `Lane Racer ${VERSION} · three.js · Supabase`)));
+    // --- Reiter: eine Sache pro Seite statt einer langen Liste ---
+    const panelOf = (...content) => h('div', { class: 'settings-panel', role: 'tabpanel' }, ...content);
+    const groupEl = (id) => groups.find((g) => g.dataset.group === id);
+    const wrap = (el) => h('div', { class: 'settings-group' }, el);
+    const TABS = [
+      { id: 'sound', label: 'Ton', content: [groupEl('sound')] },
+      { id: 'graphics', label: 'Grafik', content: [groupEl('graphics')] },
+      { id: 'game', label: 'Spiel', content: [groupEl('gameplay'), wrap(tutorialRow)] },
+      { id: 'display', label: 'Anzeige', content: [groupEl('display'), groupEl('access')] },
+      { id: 'controls', label: 'Steuerung', content: [wrap(controls)] },
+      { id: 'account', label: 'Konto', content: [wrap(nameRow), wrap(cloudRow), wrap(resetRow)] },
+    ];
+    st.tabs = TABS.map((t) => {
+      const btn = h('button', {
+        type: 'button', class: 'tab', role: 'tab', id: `lr-set-tab-${t.id}`, 'aria-selected': 'false', tabindex: '-1',
+        'aria-controls': `lr-set-panel-${t.id}`, onClick: () => this._selectSettingsTab(t.id),
+      }, t.label);
+      const panel = panelOf(...t.content);
+      panel.id = `lr-set-panel-${t.id}`;
+      panel.setAttribute('aria-labelledby', btn.id);
+      panel.hidden = true;
+      return { id: t.id, btn, panel };
+    });
+    const tablist = h('div', { class: 'tabs tabs--settings', role: 'tablist', 'aria-label': 'Einstellungen' }, st.tabs.map((t) => t.btn));
+    tablist.addEventListener('keydown', (e) => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+      const btns = st.tabs.map((t) => t.btn);
+      let i = btns.indexOf(document.activeElement);
+      if (i < 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === 'ArrowLeft') i = (i - 1 + btns.length) % btns.length;
+      else if (e.key === 'ArrowRight') i = (i + 1) % btns.length;
+      else if (e.key === 'Home') i = 0;
+      else i = btns.length - 1;
+      btns[i].focus();
+      btns[i].click();
+    });
+
+    st.body = h('div', { class: 'sheet__body' }, st.tabs.map((t) => t.panel),
+      h('p', { class: 'version' }, `Lane Racer ${VERSION} · three.js · Supabase`));
+    this._sheet('settings', { kicker: 'Optionen', title: 'Einstellungen' }, tablist, st.body);
+    st.active = '';
     this.st = st;
+    this._selectSettingsTab(this._settingsTab || 'sound');
   }
 
   // =========================================================================

@@ -809,7 +809,7 @@ export class Game {
     this.coinMesh = new THREE.InstancedMesh(geometry, material, MAX_COINS);
     this.coinMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.coinMesh.frustumCulled = false;
-    this.coinMesh.castShadow = true;
+    this.coinMesh.castShadow = false;
     this.scene.add(this.coinMesh);
     this.coins = Array.from({ length: MAX_COINS }, () => ({ active: false, x: 0, y: 1, z: 0, pulled: false }));
     this.coinSpin = 0;
@@ -864,7 +864,7 @@ export class Game {
     const mats = this.powerupMaterials[type];
     const core = new THREE.Mesh(this.powerupGeometries[type], mats.core);
     const ring = new THREE.Mesh(this.powerupRingGeometry, mats.ring);
-    core.castShadow = true;
+    core.castShadow = false;
     group.add(core, ring);
     group.position.set(LANE_X[lane], 1.2, z);
     this.scene.add(group);

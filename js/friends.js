@@ -44,6 +44,20 @@ export function createFriends(ctx) {
     if (friendsTabOpen()) load(boardBase());
   }
 
+  /** "Freund"-Knopf in der Party-Lobby: gleich hinzufügen und per Meldung bestätigen. */
+  async function addFromParty(code) {
+    const { profile, online, ui, audio } = ctx;
+    if (!profile.online) return;
+    const res = await online.addFriend(profile.online, code);
+    if (res.error) {
+      audio.play('error');
+      ui.toast('Freund hinzufügen', res.error, 'error');
+      return;
+    }
+    audio.play('mission');
+    ui.toast('Neuer Freund!', `${res.friend.name} ist jetzt dein Freund – ihr seht euch unter Freunde in der Rangliste.`, 'party');
+  }
+
   async function remove(id) {
     const { profile, online, ui } = ctx;
     if (!profile.online) return;
@@ -90,5 +104,5 @@ export function createFriends(ctx) {
     else copyLink();
   }
 
-  return { load, add, remove, acceptLink, copyLink, shareLink };
+  return { load, add, addFromParty, remove, acceptLink, copyLink, shareLink };
 }
