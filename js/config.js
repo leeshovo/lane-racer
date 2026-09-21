@@ -3,7 +3,7 @@
  * Einheiten: Meter, Sekunden, m/s (× 3,6 = km/h). Fahrtrichtung = -z.
  */
 
-export const VERSION = '2.0.0';
+export const VERSION = '2.1.0';
 
 // Öffentliche Supabase-Zugangsdaten (Publishable Key darf im Browser stehen –
 // geschützt wird über Row Level Security und geprüfte Server-Funktionen).
@@ -84,6 +84,25 @@ export const CONFIG = {
   coinsPerLine: 5,
   coinSpacing: 3,
 
+  // Ereignisse (zählen in Reihen, nicht in Sekunden – so erleben alle Party-Spieler dasselbe)
+  eventFirstRows: [16, 24],    // erstes Ereignis nach so vielen Reihen (min, max)
+  eventGapRows: [22, 34],      // Pause zwischen zwei Ereignissen
+  eventLengthRows: [7, 10],    // Dauer eines Ereignisses
+  rushSpacingFactor: 0.82,     // Stoßverkehr: Reihen rücken enger zusammen ...
+  rushDoubleBonus: 0.15,       // ... und öfter zwei Autos nebeneinander
+  rushNearMissFactor: 2,       // dafür doppelte Münzen für Beinahe-Unfälle
+  goldCoinsPerLine: 9,         // Goldrausch: längere Münzlinien
+  bossFirstRow: 58,            // Schwerlast-Konvoi: erste Reihe ...
+  bossGapRows: [80, 110],      // ... und Abstand dazwischen
+  bossExtraSpacing: 14,        // zusätzlicher Platz vor und hinter dem Konvoi (Fairness)
+  bossPassCoins: 25,           // Belohnung fürs Überholen
+  bossSmashCoins: 15,          // Belohnung fürs Rammen
+
+  // Straßenverlauf (Kurven und Hügel, rein optisch – gefahren wird immer geradeaus)
+  bendRampDistance: 500,       // so viele Meter bleibt die Straße am Anfang gerade
+  bendWaveX: 1100,             // Länge einer Kurven-Welle in Metern
+  bendWaveY: 830,              // Länge einer Hügel-Welle in Metern
+
   // Power-ups
   magnetTime: 10,
   magnetRange: 4.6,      // seitliche Reichweite (eine Spur weit)
@@ -111,6 +130,15 @@ export const WORLDS = [
   { id: 'inferno', name: 'Vulkan',     tagline: 'Lava links, Lava rechts' },
 ];
 export const LEVELS_PER_WORLD = 3;
+
+// Wie stark die Straße pro Welt kurvt (x) und über Hügel führt (y): Versatz in Metern in 215 m Entfernung.
+export const WORLD_BEND = {
+  meadow:  { x: 5,  y: 2.5 },
+  canyon:  { x: 12, y: 3 },
+  neon:    { x: 4,  y: 1.5 },
+  frost:   { x: 8,  y: 6 },
+  inferno: { x: 13, y: 5 },
+};
 export const worldIndexForLevel = (level) =>
   Math.min(WORLDS.length - 1, Math.floor((Math.max(1, level) - 1) / LEVELS_PER_WORLD));
 
@@ -127,54 +155,63 @@ export const PLAYER_SIZE = [1.9, 1.5, 4.2]; // Breite, Höhe, Länge
  * stats: speed = Faktor auf die Höchstgeschwindigkeit beim Gasgeben,
  *        handling = Faktor auf die Lenk-Federhärte,
  *        nitro = Faktor auf Nitro-Dauer.
- * perk: Sonderfähigkeit (siehe PERKS).
+ * perk: passive Sonderfähigkeit (siehe PERKS).
+ * ability: aktive Fähigkeit auf Taste F/E mit Abklingzeit (siehe Game.useAbility).
  * model: welches Modell cars.js baut.
  */
 export const CARS = [
   {
     id: 'blitz', name: 'Blitz', model: 'coupe', price: 0,
+    ability: { id: 'boost',     name: 'Blitzstart',   text: 'Füllt sofort die Nitro-Leiste auf 60 %',                 cooldown: 35, duration: 0 },
     description: 'Das Coupé, mit dem alles anfängt. Ausgewogen und flink.',
     colors: ['#ff5a1f', '#ffc93c', '#2ec4b6', '#f4f6fa'],
     stats: { speed: 1.0, handling: 1.0, nitro: 1.0 }, perk: null,
   },
   {
     id: 'kiwi', name: 'Kiwi', model: 'hatch', price: 300,
+    ability: { id: 'pulse',     name: 'Münzsog',      text: 'Saugt alle Münzen der nächsten 50 m an',                 cooldown: 20, duration: 0 },
     description: 'Kleiner Stadtflitzer, lenkt wie auf Schienen.',
     colors: ['#8bd346', '#ff7eb6', '#4d9de0', '#f4f6fa'],
     stats: { speed: 0.97, handling: 1.18, nitro: 1.0 }, perk: 'coinBonus',
   },
   {
     id: 'bulldog', name: 'Bulldog', model: 'muscle', price: 800,
+    ability: { id: 'ram',       name: 'Rammbock',     text: '3 s unverwundbar: Autos fliegen zur Seite',              cooldown: 30, duration: 3 },
     description: 'V8-Muskelpaket. Rammt mit Nitro doppelt ertragreich.',
     colors: ['#1d3fbb', '#c1121f', '#111418', '#ffc93c'],
     stats: { speed: 1.06, handling: 0.92, nitro: 1.1 }, perk: 'smashPlus',
   },
   {
     id: 'rancher', name: 'Rancher', model: 'pickup', price: 1500,
+    ability: { id: 'repair',    name: 'Reparatur',    text: 'Schutzschild sofort wiederherstellen',                   cooldown: 40, duration: 0 },
     description: 'Robuster Pick-up. Startet jede Runde mit Schutzschild.',
     colors: ['#6b705c', '#b5651d', '#264653', '#e9ecef'],
     stats: { speed: 0.95, handling: 0.95, nitro: 1.0 }, perk: 'startShield',
   },
   {
     id: 'sheriff', name: 'Sheriff', model: 'police', price: 2500,
+    ability: { id: 'siren',     name: 'Sirene',       text: '4 s lang macht der Verkehr Platz und fährt schneller',   cooldown: 30, duration: 4 },
     description: 'Abfangjäger mit Blaulicht. Startet mit halbem Nitro.',
     colors: ['#f4f6fa', '#111418', '#1d3fbb', '#2d6a4f'],
     stats: { speed: 1.05, handling: 1.05, nitro: 1.1 }, perk: 'nitroStart',
   },
   {
     id: 'neon', name: 'Neon GT', model: 'gt', price: 4000,
+    ability: { id: 'phase',     name: 'Phasensprung', text: '1,8 s durch alles hindurch fahren',                      cooldown: 25, duration: 1.8 },
     description: 'Leuchtender Unterboden. Beinahe-Unfälle füllen mehr Nitro.',
     colors: ['#b517ff', '#00e5ff', '#ff2e88', '#1a1a2e'],
     stats: { speed: 1.1, handling: 1.05, nitro: 1.15 }, perk: 'nearMissPlus',
   },
   {
     id: 'rakete', name: 'Rakete F1', model: 'formula', price: 6500,
+    ability: { id: 'overdrive', name: 'Overdrive',    text: '5 s lang +30 % Höchsttempo und Beschleunigung',          cooldown: 30, duration: 5 },
     description: 'Formelwagen. Pure Werte, keine Kompromisse.',
     colors: ['#e10600', '#00a19b', '#ff8700', '#f4f6fa'],
     stats: { speed: 1.15, handling: 1.22, nitro: 1.1 }, perk: null,
   },
   {
     id: 'phantom', name: 'Phantom X', model: 'hover', price: 10000,
+    ability: { id: 'hop',       name: 'Schwebesprung', text: 'Springt in hohem Bogen über den Verkehr',               cooldown: 22, duration: 1.4 },
     description: 'Schwebt statt zu rollen. Eingebauter Münzmagnet.',
     colors: ['#c0c7d1', '#ffd700', '#00ffa3', '#ff3b4e'],
     stats: { speed: 1.18, handling: 1.15, nitro: 1.3 }, perk: 'magnet',
@@ -202,6 +239,7 @@ export const TRAFFIC = [
   { type: 'van',    weight: 12, size: [2.0, 2.3, 4.9] },
   { type: 'truck',  weight: 14, size: [2.35, 3.2, 7.2] },
   { type: 'police', weight: 4,  size: [1.95, 1.65, 4.6] },
+  { type: 'boss',   weight: 0,  size: [2.35, 3.2, 15.0] }, // Schwerlast-Konvoi (zwei Lkw), nur als Ereignis
 ];
 export const TRAFFIC_COLORS = ['#2f7de1', '#f2c200', '#2fbf71', '#e9ecef', '#8e5bd6', '#1fb5c9', '#3a4250', '#9aa5b1', '#7a1f2b'];
 
@@ -224,6 +262,7 @@ export const MISSION_POOL = [
   { id: 'overtake', stat: 'overtakes',      mode: 'total', text: 'Überhole insgesamt {n} Fahrzeuge',      tiers: [[100, 100], [300, 250], [800, 500]] },
   { id: 'level',    stat: 'level',          mode: 'run',   text: 'Erreiche Level {n}',                    tiers: [[4, 150], [7, 300], [10, 500], [13, 800]] },
   { id: 'nitro',    stat: 'nitroUses',      mode: 'run',   text: 'Zünde {n}× Nitro in einer Runde',        tiers: [[2, 100], [4, 200], [7, 400]] },
+  { id: 'daily',    stat: 'dailyRuns',      mode: 'total', text: 'Fahre {n} Tagesrennen',                 tiers: [[1, 150], [3, 300], [7, 600]] },
   { id: 'party',    stat: 'partyRaces',     mode: 'total', text: 'Fahre {n} Party-Rennen mit Freunden',   tiers: [[1, 200], [3, 400], [10, 1000]] },
 ];
 

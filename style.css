@@ -2718,6 +2718,9 @@ button.chip:hover .chip__edit { opacity: 1; color: var(--gold); }
  * ======================================================================== */
 .screen--gameover {
   display: grid;
+  /* feste Zeilenhöhe, sonst greift max-height: 100% der Karte nicht und sie wird höher als das Fenster */
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   place-items: center;
   padding:
     calc(var(--sat) + 70px) calc(var(--sar) + 16px)
@@ -3592,4 +3595,115 @@ button.chip:hover .chip__edit { opacity: 1; color: var(--gold); }
   }
   .pause__backdrop,
   .modal__backdrop { background: rgba(4, 6, 10, 0.94); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+
+/* ===========================================================================
+ * 26. Ergänzungen 2.1: Fähigkeit, Tagesrennen, Spielstand sichern
+ * ======================================================================== */
+
+/* --- Fähigkeit im HUD (Taste F/E) --- */
+.ability {
+  position: relative;
+  z-index: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(300px, 44vw);
+  padding: 6px 14px 9px;
+  font-family: var(--font-cond);
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.ability::before {
+  content: '';
+  position: absolute;
+  inset: 0 5px;
+  z-index: -1;
+  transform: skewX(var(--sk));
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: rgba(5, 7, 11, 0.7);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.ability .icon { width: 1em; height: 1em; flex: none; }
+.ability__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ability__key { margin-left: auto; font-size: 0.72em; letter-spacing: 0.04em; }
+.ability__bar {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 3px;
+  height: 3px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.6);
+}
+.ability__fill {
+  display: block;
+  height: 100%;
+  background: currentColor;
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+.ability[data-state='ready'] { color: var(--gold); }
+.ability[data-state='ready']::before { border-color: rgba(255, 201, 60, 0.6); }
+.ability[data-state='active'] { color: #FFFFFF; }
+.ability[data-state='active']::before { border-color: var(--gold); box-shadow: 0 0 24px rgba(255, 201, 60, 0.5); }
+.ability[data-state='active'] .ability__name { animation: puEnding 0.5s steps(2, end) infinite; }
+
+/* --- Touch-Knopf für die Fähigkeit --- */
+.tbtn--ability { width: 76px; height: 76px; color: var(--gold); align-self: flex-end; }
+.tbtn--ability .icon { width: 26px; height: 26px; }
+.tbtn--ability .tbtn__text {
+  max-width: 66px;
+  font-size: 0.54rem;
+  letter-spacing: 0.05em;
+  line-height: 1.05;
+  text-align: center;
+  color: var(--gold);
+}
+.tbtn--ability .tbtn__ring {
+  background: conic-gradient(var(--gold) calc(var(--n, 0) * 360deg), rgba(243, 245, 249, 0.12) 0);
+}
+.tbtn--ability[data-state='charging'] { opacity: 0.6; }
+.tbtn--ability[data-state='ready']::before { border-color: rgba(255, 201, 60, 0.65); background: rgba(255, 201, 60, 0.14); }
+.tbtn--ability[data-state='active']::before { border-color: var(--gold); background: rgba(255, 201, 60, 0.3); box-shadow: 0 0 28px rgba(255, 201, 60, 0.5); }
+.tpad__row { align-items: flex-end; }
+
+/* --- Tagesrennen-Kachel im Menü --- */
+.navbtn--daily .navbtn__icon { color: var(--gold); background: rgba(255, 201, 60, 0.13); }
+.navbtn--daily .navbtn__sub { color: var(--gold); }
+
+/* --- Spielstand sichern (Einstellungen) --- */
+.setting--cloud { flex-direction: column; align-items: stretch; gap: 12px; }
+.cloud__row { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; }
+.cloud__row .field__input { flex: 1 1 210px; min-width: 0; }
+.field__input--small { font-size: 0.95rem; letter-spacing: 0.06em; }
+.setting__status { display: block; margin-top: 4px; }
+.setting__msg { margin: 0; min-height: 1.4em; }
+.setting__msg[data-state='ok'] { color: var(--good); }
+.setting__msg[data-state='error'] { color: var(--danger); }
+.car__ability { background: rgba(46, 196, 182, 0.08); box-shadow: inset 2px 0 0 var(--teal); }
+.car__ability .icon { color: var(--teal); }
+
+/* Niedrige Fenster (z. B. 720p-Laptops): weniger Rand oben, damit Karte und Knöpfe komplett sichtbar bleiben */
+@media (max-height: 800px) {
+  .screen--gameover { padding-top: calc(var(--sat) + 14px); }
+}
+
+/* Handy hochkant mit Touch-Steuerung: Anzeigen über den Knöpfen statt darunter.
+   Die Nitro-Leiste entfällt, weil der Nitro-Knopf seine Füllung als Ring zeigt. */
+@media (max-width: 899.98px) and (orientation: portrait) {
+  #ui.is-touch .hud-bottom {
+    left: calc(var(--sal) + 14px);
+    transform: none;
+    align-items: flex-start;
+    bottom: calc(var(--sab) + 192px);
+    max-width: calc(100vw - 150px);
+  }
+  #ui.is-touch .nitro { display: none; }
+  #ui.is-touch .ability { width: auto; max-width: 100%; }
+  #ui.is-touch .hud-speed { bottom: calc(var(--sab) + 192px); }
 }

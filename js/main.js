@@ -8,11 +8,16 @@ import * as THREE from 'three';
 import { CONFIG, SUPABASE, CARS, PERKS, WORLDS, POWERUPS, carById, VERSION } from './config.js';
 import {
   loadProfile, saveProfile, buyCar, selectCar, setCarColor, colorOf, applyRun, selectedCarOf,
+  snapshotOf, adoptSnapshot, progressOf,
 } from './storage.js';
 import { World } from './world.js';
 import { Effects } from './effects.js';
 import { AudioManager } from './audio.js';
-import { Online, partyCodeFromUrl, partyShareUrl, normalizePartyCode, generatePartyCode } from './online.js';
+import {
+  Online, partyCodeFromUrl, partyShareUrl, normalizePartyCode, generatePartyCode,
+  dailyKey, dailyRaceId, makeRecoveryCode, parseRecoveryCode,
+} from './online.js';
+import { updateBend } from './bend.js';
 import { UI } from './ui.js';
 import { Game } from './game.js';
 
@@ -37,7 +42,17 @@ const app = {
   race: null,           // { raceId, results: Map<id, {score, alive}> }
   gameOverAt: 0,
   knownMembers: new Set(),
+  runId: null,          // vom Server ausgegebene Runden-ID (siehe beginRun) – ohne sie wird kein Score angenommen
+  runPromise: null,
+  runToken: 0,
+  runSeed: null,
+  lastStart: null,      // { seed, raceId, challenge }: "Nochmal" wiederholt Tagesrennen und Herausforderungen
+  challenge: null,      // Herausforderung aus einem Link: { seed, score, name }
+  activeChallenge: null,
+  lastRun: null,        // { seed, distance } der letzten Runde (für "Herausfordern")
+  cloud: { savedAt: null, timer: 0 },
 };
+app.challenge = readChallengeFromUrl();
 
 let renderer;
 let scene;
@@ -55,7 +70,11 @@ const isTouch = matchMedia('(pointer: coarse)').matches;
 const ui = new UI({
   root: document.getElementById('ui'),
   callbacks: {
-    onPlay: () => startRun({}),
+    onPlay: () => playPressed(),
+    onOpenDaily: () => startDaily(),
+    onChallenge: () => shareChallenge(),
+    onCopyRecovery: () => copyRecovery(),
+    onRestoreCode: (code) => restoreFromCode(code),
     onOpenGarage: () => openGarage(),
     onOpenLeaderboard: () => openLeaderboard(),
     onOpenParty: () => openParty(),
@@ -79,7 +98,7 @@ const ui = new UI({
     onSettingsChange: (partial) => changeSettings(partial),
     onPause: () => setPaused(true),
     onResume: () => setPaused(false),
-    onRestart: () => startRun({}),
+    onRestart: () => restartRun(),
     onToMenu: () => toMenu(),
     onTouch: (action) => handleTouch(action),
     onUiSound: (name) => audio.play(name || 'click'),
@@ -136,11 +155,15 @@ function boot() {
   applyCameraLayout();
 
   // Online-Verbindung im Hintergrund aufbauen – das Spiel läuft auch offline
-  online.onStatus(() => renderTopBar());
+  online.onStatus(() => {
+    renderTopBar();
+    if (app.screen === 'settings') refreshRecoveryUi();
+  });
   online.init().then(async (ok) => {
     renderTopBar();
     if (ok && profile.name) {
       await ensureRegistered();
+      await pullCloud();
       if (app.pendingParty) joinParty(app.pendingParty);
     }
   });
@@ -157,9 +180,11 @@ function boot() {
   }
 
   requestAnimationFrame(frame);
+  announceChallenge();
+  registerServiceWorker();
 
   // Für Neugierige in der Browser-Konsole
-  window.laneRacer = { VERSION, app, profile, game, world, effects, audio, online, ui, camera, renderer };
+  window.laneRacer = { VERSION, app, profile, game, world, effects, audio, online, ui, camera, renderer, frame };
 }
 
 // ===========================================================================
@@ -173,7 +198,8 @@ const perf = { sum: 0, frames: 0, slowFor: 0 };
 
 function frame(now) {
   requestAnimationFrame(frame);
-  const dt = Math.min((now - lastTime) / 1000, 0.05);
+  // Zeitschritt in Sekunden: nie negativ (falls die Zeitachse springt) und höchstens 50 ms (nach Rucklern)
+  const dt = clamp((now - lastTime) / 1000, 0, 0.05);
   lastTime = now;
 
   const running = !app.paused;
@@ -186,6 +212,10 @@ function frame(now) {
   worldDistance += speed * dt;
   world.update(running ? dt : 0, { speed, distance: worldDistance, camera });
   if (world.isNight !== game.night) game.setNight(world.isNight);
+
+  // Kurven und Hügel: im Rennen aus der gefahrenen Strecke (für alle Party-Fahrer gleich), im Menü gemächlich
+  const driving = game.state === 'playing' || game.state === 'countdown' || game.state === 'crashed';
+  updateBend(driving ? game.distance : worldDistance * 0.4, world.worldIndex, running ? dt : 0);
 
   const speedRatio = clamp(game.player.speed / TOP_SPEED, 0, 1);
   const inRun = game.state === 'playing' || game.state === 'countdown';
@@ -204,7 +234,7 @@ function frame(now) {
   });
 
   if (inRun || game.state === 'crashed') {
-    ui.updateHud({ ...game.hud(), live: liveList(now), race: Boolean(app.race && game.raceId) });
+    ui.updateHud({ ...game.hud(), live: liveList(now), race: Boolean(app.race && app.race.raceId === game.raceId) });
     if (app.party && running) app.party.sendState(game.liveState());
   }
 
@@ -347,10 +377,13 @@ function renderMenu() {
     car: selectedCarOf(profile),
     missions: profile.missions,
     party: app.party ? { code: app.partyCode, memberCount: app.party.members.length } : null,
+    daily: dailyMenuText(),
   });
 }
 
 function toMenu() {
+  app.lastStart = null;
+  app.challenge = null;
   app.paused = false;
   ui.showPause(false);
   audio.setPaused(false);
@@ -406,6 +439,7 @@ function purchaseCar(carId) {
   app.previewCar = carId;
   game.setPlayerCar(carId, colorOf(profile, carId));
   syncPlayerOnline();
+  scheduleCloudSave();
   renderGarage();
   renderTopBar();
 }
@@ -416,6 +450,7 @@ function chooseCar(carId) {
   app.previewCar = carId;
   game.setPlayerCar(carId, colorOf(profile, carId));
   syncPlayerOnline();
+  scheduleCloudSave();
   renderGarage();
 }
 
@@ -424,6 +459,7 @@ function chooseColor(carId, color) {
   saveProfile(profile);
   if (app.previewCar === carId) game.setPlayerCar(carId, color);
   if (profile.selectedCar === carId) syncPlayerOnline();
+  scheduleCloudSave();
   renderGarage();
 }
 
@@ -434,6 +470,7 @@ function openMissions() {
 
 function openSettings() {
   ui.renderSettings(profile.settings);
+  refreshRecoveryUi();
   setScreen('settings');
 }
 
@@ -465,7 +502,7 @@ async function loadLeaderboard(kind) {
     ui.renderLeaderboard({ ...base, rows: [], loading: false, error: 'Keine Verbindung zur Rangliste. Prüfe deine Internetverbindung.' });
     return;
   }
-  const res = await online.leaderboard(kind, app.partyCode);
+  const res = await online.leaderboard(kind, kind === 'daily' ? dailyKey() : app.partyCode);
   if (app.leaderboardKind !== kind || app.screen !== 'leaderboard') return; // inzwischen anderer Tab
   ui.renderLeaderboard({ ...base, rows: res.rows || [], loading: false, error: res.error || null });
 }
@@ -764,12 +801,17 @@ function ghostMembers() {
 
 /** Live-Rangliste fürs HUD (höchstens 4× pro Sekunde neu berechnet). */
 function liveList(now) {
-  if (!app.party) return null;
+  const challenge = app.activeChallenge;
+  if (!app.party && !challenge) return null;
   if (liveCache && now - liveCacheAt < 250) return liveCache;
   liveCacheAt = now;
-  const list = app.party.members
-    .filter((m) => !m.isMe && ['driving', 'countdown', 'crashed'].includes(m.status))
-    .map((m) => ({ name: m.name, color: m.color, distance: Math.floor(m.distance || 0), alive: m.status !== 'crashed' && m.alive !== false, isMe: false }));
+  const list = app.party
+    ? app.party.members
+      .filter((m) => !m.isMe && ['driving', 'countdown', 'crashed'].includes(m.status))
+      .map((m) => ({ name: m.name, color: m.color, distance: Math.floor(m.distance || 0), alive: m.status !== 'crashed' && m.alive !== false, isMe: false }))
+    : [];
+  // Herausforderung: der Score des Freundes steht als feste "Ziellinie" in der Liste
+  if (challenge) list.push({ name: `${challenge.name.slice(0, 9)} Ziel`, color: '#FFC93C', distance: challenge.score, alive: true, isMe: false });
   list.push({ name: profile.name, color: colorOf(profile, profile.selectedCar), distance: Math.floor(game.distance), alive: game.state !== 'crashed', isMe: true });
   list.sort((a, b) => b.distance - a.distance);
   liveCache = list;
@@ -777,14 +819,228 @@ function liveList(now) {
 }
 
 // ===========================================================================
+// Start-Varianten: Fahren, Tagesrennen, Herausforderung
+// ===========================================================================
+
+/** "Fahren": normale Runde – oder die Herausforderung eines Freunden, falls ein Link offen ist. */
+function playPressed() {
+  if (app.challenge) {
+    startRun({ seed: app.challenge.seed, challenge: app.challenge, remember: true });
+  } else {
+    startRun({});
+  }
+}
+
+/** "Nochmal": Tagesrennen und Herausforderungen wiederholen dieselbe Strecke, alles andere startet neu. */
+function restartRun() {
+  if (app.lastStart) startRun({ ...app.lastStart, remember: true });
+  else startRun({});
+}
+
+/** Tagesrennen: heute für alle Spieler weltweit derselbe Seed, also dieselbe Strecke. */
+function startDaily() {
+  startRun({ seed: `daily-${dailyKey()}`, raceId: dailyRaceId(), remember: true });
+  ui.toast('Tagesrennen', 'Heute für alle dieselbe Strecke – dein bester Versuch zählt.', 'party');
+}
+
+function dailyMenuText() {
+  const d = profile.daily;
+  if (d && d.key === dailyKey() && d.best > 0) return `Heute: ${d.best.toLocaleString('de-DE')} m`;
+  return 'Neue Strecke jeden Tag';
+}
+
+/** Platz im heutigen Tagesrennen ermitteln und einblenden. */
+async function announceDailyPlace() {
+  const res = await online.leaderboard('daily', dailyKey());
+  if (!res.rows || app.screen !== 'gameover') return;
+  const id = profile.online?.id;
+  const index = res.rows.findIndex((r) => r.id === id || r.player_id === id);
+  if (index >= 0) ui.toast(`Tagesrennen: Platz ${index + 1}`, `Von ${res.rows.length} ${res.rows.length === 1 ? 'Fahrer' : 'Fahrern'} heute`, index === 0 ? 'mission' : 'info');
+}
+
+/** Herausforderungs-Link aus der Adresse lesen (?c=…). Alles wird geprüft, der Link ist nicht vertrauenswürdig. */
+function readChallengeFromUrl() {
+  try {
+    const raw = new URLSearchParams(location.search).get('c');
+    if (!raw || raw.length > 400) return null;
+    const padded = raw.replace(/-/g, '+').replace(/_/g, '/');
+    const bytes = Uint8Array.from(atob(padded), (ch) => ch.charCodeAt(0));
+    const data = JSON.parse(new TextDecoder().decode(bytes));
+    const seed = typeof data.s === 'string' && /^[A-Za-z0-9._:-]{4,60}$/.test(data.s) ? data.s : null;
+    const score = Number.isFinite(data.d) ? Math.floor(data.d) : 0;
+    if (!seed || score < 1 || score > 10_000_000) return null;
+    // Steuerzeichen und spitze Klammern aus dem Namen entfernen (der Link ist nicht vertrauenswürdig)
+    const name = Array.from(String(data.n ?? '')).filter((c) => { const n = c.charCodeAt(0); return n > 31 && !(n >= 127 && n <= 159) && c !== '<' && c !== '>'; }).join('').replace(/\s+/g, ' ').trim().slice(0, 16) || 'Ein Freund';
+    return { seed, score, name };
+  } catch (err) {
+    return null;
+  }
+}
+
+function announceChallenge() {
+  const ch = app.challenge;
+  if (!ch) return;
+  setTimeout(() => ui.toast(`${ch.name} fordert dich heraus`, `${ch.score.toLocaleString('de-DE')} m auf derselben Strecke – drück „Fahren“!`, 'party'), 1200);
+}
+
+/** Link zur letzten Runde: gleiche Strecke (Seed) plus der Score als Ziel. */
+function buildChallengeUrl() {
+  const run = app.lastRun;
+  if (!run || !run.seed) return null;
+  const payload = JSON.stringify({ s: run.seed, d: run.distance, n: profile.name || 'Ein Freund' });
+  let bin = '';
+  for (const b of new TextEncoder().encode(payload)) bin += String.fromCharCode(b);
+  const b64 = btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return `${location.origin}${location.pathname}?c=${b64}`;
+}
+
+function shareChallenge() {
+  const url = buildChallengeUrl();
+  if (!url) {
+    ui.toast('Noch keine Runde', 'Fahr zuerst eine Runde, dann kannst du Freunde herausfordern.', 'info');
+    return;
+  }
+  const text = `Schlag meine ${app.lastRun.distance.toLocaleString('de-DE')} m in Lane Racer – gleiche Strecke, gleicher Verkehr!`;
+  if (navigator.share) {
+    navigator.share({ title: 'Lane Racer – Herausforderung', text, url }).catch(() => {});
+  } else {
+    copyText(`${text} ${url}`, 'Herausforderung kopiert');
+  }
+}
+
+// ===========================================================================
+// Server-gemessene Runden
+// ===========================================================================
+
+/** Meldet den Rundenstart beim Server an; die Runden-ID wird beim Score mitgeschickt. */
+function registerRunOnServer() {
+  app.runId = null;
+  const token = ++app.runToken;
+  if (!profile.online || online.status === 'offline') {
+    app.runPromise = Promise.resolve();
+    return;
+  }
+  app.runPromise = online.beginRun(profile.online).then((res) => {
+    if (token === app.runToken && res.runId) app.runId = res.runId;
+  });
+}
+
+// ===========================================================================
+// Cloud-Spielstand und Sicherungscode
+// ===========================================================================
+
+function scheduleCloudSave(delay = 2500) {
+  clearTimeout(app.cloud.timer);
+  app.cloud.timer = setTimeout(pushCloud, delay);
+}
+
+async function pushCloud() {
+  if (!profile.online || online.status !== 'online') return false;
+  const res = await online.saveProfile(profile.online, snapshotOf(profile));
+  if (!res.savedAt) return false;
+  app.cloud.savedAt = res.savedAt;
+  if (app.screen === 'settings') refreshRecoveryUi();
+  return true;
+}
+
+/** Beim Start: Ist in der Cloud ein weiterer Spielstand als auf diesem Gerät? Dann den übernehmen. */
+async function pullCloud() {
+  if (!profile.online || online.status !== 'online') return;
+  const res = await online.loadProfile(profile.online);
+  if (res.error) return;
+  app.cloud.savedAt = res.updatedAt;
+  const cloudProgress = progressOf(res.data);
+  const localProgress = progressOf(profile);
+  if (res.data && cloudProgress > localProgress) {
+    adoptSnapshot(profile, res.data);
+    saveProfile(profile);
+    ui.toast('Spielstand geladen', 'Ein weiterer Stand aus der Cloud wurde übernommen.', 'info');
+    afterProfileChanged();
+  } else if (localProgress > cloudProgress) {
+    pushCloud();
+  }
+  if (app.screen === 'settings') refreshRecoveryUi();
+}
+
+/** Nach dem Laden/Wiederherstellen alles auffrischen, was den Spielstand zeigt. */
+function afterProfileChanged() {
+  if (game.state === 'idle') game.setPlayerCar(profile.selectedCar, colorOf(profile, profile.selectedCar));
+  renderTopBar();
+  renderMenu();
+  if (app.screen === 'garage') renderGarage();
+  if (app.screen === 'missions') openMissions();
+}
+
+function refreshRecoveryUi() {
+  let status;
+  if (!profile.online) status = 'Melde dich mit einem Namen an – dann wird dein Spielstand gesichert.';
+  else if (online.status !== 'online') status = 'Offline – gesichert wird, sobald du wieder online bist.';
+  else if (app.cloud.savedAt) status = `Zuletzt gesichert: ${new Date(app.cloud.savedAt).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} Uhr`;
+  else status = 'Wird nach deiner nächsten Runde gesichert.';
+  ui.setRecoveryCode({
+    code: makeRecoveryCode(profile.online),
+    hasProgress: profile.stats.runs > 0 || profile.stats.totalCoins > 0,
+    status,
+  });
+}
+
+function copyRecovery() {
+  const code = makeRecoveryCode(profile.online);
+  if (code) copyText(code, 'Sicherungscode kopiert');
+}
+
+/** Stellt einen Spielstand auf diesem Gerät wieder her (Code stammt von einem anderen Gerät). */
+async function restoreFromCode(text) {
+  const identity = parseRecoveryCode(text);
+  if (!identity) {
+    ui.setRestoreResult({ ok: false, message: 'Dieser Sicherungscode ist ungültig. Kopiere ihn vollständig, er beginnt mit LR1-.' });
+    return;
+  }
+  const res = await online.loadProfile(identity);
+  if (res.error) {
+    ui.setRestoreResult({ ok: false, message: res.code === 'auth' ? 'Zu diesem Code gibt es keinen Spieler. Prüfe, ob du ihn richtig kopiert hast.' : res.error });
+    return;
+  }
+  if (app.party) await leaveParty();
+  profile.online = identity;
+  profile.name = res.name;
+  if (res.data) adoptSnapshot(profile, res.data);
+  else profile.best = Math.max(profile.best, res.best);
+  saveProfile(profile);
+  app.cloud.savedAt = res.updatedAt;
+  afterProfileChanged();
+  refreshRecoveryUi();
+  ui.setRestoreResult({ ok: true, message: `Willkommen zurück, ${res.name}! Dein Spielstand ist wiederhergestellt.` });
+  audio.play('buy');
+}
+
+/** Text in die Zwischenablage kopieren (mit Rückmeldung). */
+function copyText(text, doneMessage) {
+  const done = () => ui.toast(doneMessage, 'In der Zwischenablage', 'info');
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).then(done, () => { if (fallbackCopy(text)) done(); });
+  } else if (fallbackCopy(text)) {
+    done();
+  }
+}
+
+// ===========================================================================
+// Offline-Fähigkeit: Service Worker
+// ===========================================================================
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator) || !/^https?:$/.test(location.protocol)) return;
+  navigator.serviceWorker.register('sw.js').catch((err) => console.info('[sw] nicht registriert:', err?.message || err));
+}
+
+// ===========================================================================
 // Runde starten / beenden
 // ===========================================================================
-function startRun({ seed, raceId = null, countdown }) {
+function startRun({ seed, raceId = null, countdown, challenge = null, remember = false }) {
   unlockAudio();
   app.paused = false;
   ui.showPause(false);
   audio.setPaused(false);
-  if (!raceId) app.race = null;
+  if (!raceId || String(raceId).startsWith('daily-')) app.race = null;
 
   if (game.carId !== profile.selectedCar || game.carColor !== colorOf(profile, profile.selectedCar)) {
     game.setPlayerCar(profile.selectedCar, colorOf(profile, profile.selectedCar));
@@ -792,8 +1048,14 @@ function startRun({ seed, raceId = null, countdown }) {
   world.setWorld(0);
   audio.setMusic(WORLDS[0].id);
   audio.setMusicIntensity(0.5);
+  const runSeed = seed ?? `${Date.now()}-${Math.random()}`;
+  app.runSeed = runSeed;
+  app.activeChallenge = challenge;
+  app.lastStart = remember ? { seed: runSeed, raceId, challenge } : null;
+  liveCache = null;
+  registerRunOnServer();
   game.start({
-    seed: seed ?? `${Date.now()}-${Math.random()}`,
+    seed: runSeed,
     raceId,
     party: app.partyCode,
     countdown: countdown ?? CONFIG.countdownSolo,
@@ -843,6 +1105,26 @@ const gameEvents = {
     if (active) ui.flash('#00e5ff');
     audio.setMusicIntensity(active ? 1 : 0.5);
   },
+  onAbility(ability) {
+    ui.popup(ability.name, 'power');
+    ui.flash('#ffc93c');
+  },
+  onEvent({ type, phase }) {
+    if (type === 'boss') {
+      ui.toast('Achtung, Konvoi!', 'Zwei Lkw hintereinander – weich aus oder ramm sie mit Nitro', 'error');
+      audio.play('shieldBreak');
+    } else if (phase === 'start' && type === 'gold') {
+      ui.toast('Goldrausch!', 'Lange Münzlinien auf der freien Spur', 'mission');
+      ui.flash('#ffc93c');
+      audio.play('levelUp');
+    } else if (phase === 'start' && type === 'rush') {
+      ui.toast('Stoßverkehr!', 'Dichter Verkehr – Beinahe-Unfälle zählen doppelt', 'error');
+      audio.play('levelUp');
+    }
+  },
+  onBoss({ coins }) {
+    ui.popup(`KONVOI ÜBERHOLT  +${coins}`, 'combo');
+  },
   onCrash() {
     ui.flash('#ff3b4e');
     ui.setTouchControls(false);
@@ -855,11 +1137,24 @@ const gameEvents = {
 
 async function finishRun(result) {
   const summary = applyRun(profile, result);
-  saveProfile(profile);
   const distance = Math.floor(result.distance);
+  if (result.isDaily) {
+    const key = dailyKey();
+    if (!profile.daily || profile.daily.key !== key) profile.daily = { key, best: 0 };
+    profile.daily.best = Math.max(profile.daily.best, distance);
+  }
+  saveProfile(profile);
+  scheduleCloudSave(1500);
   app.gameOverAt = performance.now();
+  app.lastRun = { seed: result.seed, distance };
 
-  if (app.party && result.raceId) {
+  if (app.activeChallenge) {
+    const ch = app.activeChallenge;
+    if (distance > ch.score) ui.toast('Herausforderung geschafft!', `Du hast ${ch.name} geschlagen: ${distance.toLocaleString('de-DE')} m gegen ${ch.score.toLocaleString('de-DE')} m`, 'mission');
+    else ui.toast('Knapp daneben', `${ch.name} hat ${ch.score.toLocaleString('de-DE')} m – dir fehlen ${(ch.score - distance + 1).toLocaleString('de-DE')} m`, 'info');
+  }
+
+  if (app.party && result.isPartyRace) {
     app.party.sendRaceEnd(result.raceId, distance);
     app.race?.results.set(profile.online?.id, { score: distance, alive: false });
   }
@@ -880,7 +1175,7 @@ async function finishRun(result) {
       level: result.level,
       time: result.duration,
     },
-    race: result.raceId ? raceView() : null,
+    race: result.isPartyRace ? raceView() : null,
     online: canSubmit ? 'pending' : 'offline',
   });
   renderTopBar();
@@ -896,7 +1191,13 @@ async function finishRun(result) {
     ensureRegistered();
     return;
   }
+  await app.runPromise;
+  if (!app.runId) {
+    if (app.screen === 'gameover') ui.updateGameOver({ online: 'error' });
+    return;
+  }
   const res = await online.submitScore(profile.online, {
+    runId: app.runId,
     score: distance,
     duration: Math.max(1, result.duration),
     coins: summary.total,
@@ -912,6 +1213,7 @@ async function finishRun(result) {
   if (res && !res.error) {
     ui.updateGameOver({ rank: res.rank, online: 'submitted' });
     if (app.partyCode) refreshPartyBoard();
+    if (result.isDaily) announceDailyPlace();
   } else {
     ui.updateGameOver({ online: 'error' });
   }
@@ -986,6 +1288,9 @@ window.addEventListener('keydown', (event) => {
       case 'Space': case 'ShiftLeft': case 'ShiftRight': case 'KeyN':
         if (!event.repeat) game.triggerNitro();
         break;
+      case 'KeyF': case 'KeyE':
+        if (!event.repeat) game.useAbility();
+        break;
       case 'KeyP': case 'Escape':
         if (!event.repeat) setPaused(true);
         break;
@@ -1044,6 +1349,7 @@ function handleTouch(action) {
     case 'left': game.changeLane(-1); break;
     case 'right': game.changeLane(1); break;
     case 'nitro': game.triggerNitro(); break;
+    case 'ability': game.useAbility(); break;
     case 'gas:down': game.setGas(true); break;
     case 'gas:up': game.setGas(false); break;
     case 'brake:down': game.setBrake(true); break;

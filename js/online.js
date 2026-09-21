@@ -63,6 +63,8 @@ const PARTY_CODE_LENGTH = 5;
 // Formate laut Datenbank-Constraints (siehe SPEC §3.5)
 const RE_PARTY = /^[A-Z0-9]{4,8}$/;
 const RE_RACE = /^[A-Za-z0-9_-]{4,40}$/;
+const RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const RE_DAY = /^[0-9]{8}$/;
 const RE_COLOR = /^#[0-9a-fA-F]{6}$/;
 const RE_ID = /^[A-Za-z0-9_-]{4,64}$/; // UUID aus der Datenbank oder lokale Gast-ID
 
@@ -97,6 +99,9 @@ const MSG = {
   raceCooldown: 'Das Rennen startet gerade …',
   badRace: 'Ungültige Renn-ID.',
   shortRun: 'Runde zu kurz für die Rangliste.',
+  noRun: 'Diese Runde wurde nicht beim Server angemeldet.',
+  badDay: 'Ungültiger Tag.',
+  badCode: 'Dieser Sicherungscode ist ungültig.',
   implausible: 'Ergebnis nicht plausibel – wird nicht gewertet.',
   unknownBoard: 'Unbekannte Rangliste.',
   nameMissing: 'Bitte gib einen Namen ein.',
@@ -232,6 +237,53 @@ function unexpected(err) {
 // ---------------------------------------------------------------------------
 // Party-Codes und Links
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Tagesrennen und Sicherungscode
+// ---------------------------------------------------------------------------
+
+/** Kennung des Tages im UTC-Kalender: "20260921". Für alle Spieler weltweit gleich. */
+export function dailyKey(date = new Date()) {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(date.getUTCDate()).padStart(2, '0');
+  return y + m + d;
+}
+
+/** Renn-ID des Tagesrennens ("daily-20260921") – der Server prüft, dass sie zu heute passt. */
+export const dailyRaceId = (date = new Date()) => 'daily-' + dailyKey(date);
+
+/** Sekunden bis zum nächsten UTC-Mitternacht (für den Countdown "neue Strecke in …"). */
+export function secondsUntilNextDaily(date = new Date()) {
+  const next = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + 1);
+  return Math.max(0, Math.round((next - date.getTime()) / 1000));
+}
+
+/**
+ * Sicherungscode: Online-ID + Geheimnis als lesbare Hex-Blöcke ("LR1-1A2B3-…").
+ * Wer den Code hat, kann den Spielstand auf einem anderen Gerät wiederherstellen –
+ * er ist also wie ein Passwort zu behandeln.
+ */
+export function makeRecoveryCode(identity) {
+  if (!identity || typeof identity.id !== 'string' || typeof identity.secret !== 'string') return null;
+  const id = identity.id.replace(/-/g, '').toLowerCase();
+  const secret = identity.secret.toLowerCase();
+  if (!/^[0-9a-f]{32}$/.test(id) || !/^[0-9a-f]{48}$/.test(secret)) return null;
+  const blocks = (id + secret).toUpperCase().match(/.{1,5}/g);
+  return 'LR1-' + blocks.join('-');
+}
+
+/** Gegenstück zu makeRecoveryCode. Gibt { id, secret } oder null zurück. */
+export function parseRecoveryCode(text) {
+  if (typeof text !== 'string' || text.length > 400) return null;
+  let s = text.trim().toLowerCase();
+  if (s.startsWith('lr1')) s = s.slice(3);
+  s = s.replace(/[^0-9a-f]/g, '');
+  if (s.length !== 80) return null;
+  const h = s.slice(0, 32);
+  const id = h.slice(0, 8) + '-' + h.slice(8, 12) + '-' + h.slice(12, 16) + '-' + h.slice(16, 20) + '-' + h.slice(20);
+  return { id, secret: s.slice(32) };
+}
 
 /** Neuer Party-Code: 5 Zeichen aus einem verwechslungsarmen Alphabet. */
 export function generatePartyCode() {
@@ -463,10 +515,14 @@ export class Online {
       if (duration < 1) return failure('invalid', MSG.shortRun);
       if (score > duration * 170 + 50) return failure('invalid', MSG.implausible);
       const raceId = typeof run.raceId === 'string' && RE_RACE.test(run.raceId) ? run.raceId : null;
+      // Ohne die vom Server ausgegebene Runden-ID (siehe beginRun) wird kein Score angenommen
+      const runId = typeof run.runId === 'string' && RE_UUID.test(run.runId) ? run.runId : null;
+      if (!runId) return failure('invalid', MSG.noRun);
 
       const res = await this._rpc('submit_score', {
         p_player: identity.id,
         p_secret: identity.secret,
+        p_run: runId,
         p_score: score,
         p_duration: duration,
         p_coins: toInt(run.coins, 0, MAX_DISTANCE, 0),
@@ -493,8 +549,8 @@ export class Online {
 
   /**
    * Rangliste laden.
-   * @param kind 'global' | 'weekly' | 'party'
-   * @param partyCode nur für 'party'
+   * @param kind 'global' | 'weekly' | 'daily' | 'party'
+   * @param partyCode nur für 'party'; bei 'daily' der Tag (YYYYMMDD, Standard: heute)
    * @param limit optional, Standard 50
    * @returns {Promise<{ rows: Array<{ rank, player_id, id, name, car, color, best, runs }> } | { error, code }>}
    */
@@ -504,7 +560,10 @@ export class Online {
       let res;
       if (kind === 'global') res = await this._rpc('leaderboard_global', { p_limit: pLimit });
       else if (kind === 'weekly') res = await this._rpc('leaderboard_weekly', { p_limit: pLimit });
-      else if (kind === 'party') {
+      else if (kind === 'daily') {
+        const day = typeof partyCode === 'string' && RE_DAY.test(partyCode) ? partyCode : dailyKey();
+        res = await this._rpc('leaderboard_daily', { p_day: day, p_limit: pLimit });
+      } else if (kind === 'party') {
         const code = normalizePartyCode(partyCode);
         if (!code) return failure('invalid', MSG.noParty);
         res = await this._rpc('leaderboard_party', { p_party: code, p_limit: pLimit });
@@ -513,6 +572,64 @@ export class Online {
       }
       if (res.error) return res;
       return { rows: sanitizeBoardRows(res.data, pLimit) };
+    } catch (err) {
+      return unexpected(err);
+    }
+  }
+
+  /**
+   * Meldet den Rundenstart beim Server an. Der Server misst ab jetzt die Zeit – dadurch
+   * lässt sich beim Einreichen keine längere Fahrzeit erfinden.
+   * @returns {Promise<{ runId: string } | { error: string, code: string }>}
+   */
+  async beginRun(identity) {
+    try {
+      if (!validIdentity(identity)) return failure('auth', MSG.noIdentity);
+      const res = await this._rpc('begin_run', { p_player: identity.id, p_secret: identity.secret });
+      if (res.error) return res;
+      const id = typeof res.data === 'string' && RE_UUID.test(res.data) ? res.data : null;
+      return id ? { runId: id } : failure('server', MSG.badResponse);
+    } catch (err) {
+      return unexpected(err);
+    }
+  }
+
+  /**
+   * Sichert den Spielstand (Münzen, Autos, Missionen …) in der Cloud.
+   * @param data reines JSON-Objekt (höchstens ~40 KB)
+   * @returns {Promise<{ savedAt: string } | { error: string, code: string }>}
+   */
+  async saveProfile(identity, data) {
+    try {
+      if (!validIdentity(identity)) return failure('auth', MSG.noIdentity);
+      if (!isObj(data)) return failure('invalid');
+      const res = await this._rpc('save_profile', { p_player: identity.id, p_secret: identity.secret, p_data: data });
+      if (res.error) return res;
+      return { savedAt: typeof res.data === 'string' ? res.data : new Date().toISOString() };
+    } catch (err) {
+      return unexpected(err);
+    }
+  }
+
+  /**
+   * Lädt den Cloud-Spielstand.
+   * @returns {Promise<{ data: object|null, updatedAt: string|null, name: string, car: string, color: string, best: number } | { error, code }>}
+   */
+  async loadProfile(identity) {
+    try {
+      if (!validIdentity(identity)) return failure('auth', MSG.noIdentity);
+      const res = await this._rpc('load_profile', { p_player: identity.id, p_secret: identity.secret });
+      if (res.error) return res;
+      const row = firstRow(res.data);
+      if (!row) return failure('auth', MSG.auth);
+      return {
+        data: isObj(row.data) ? row.data : null,
+        updatedAt: typeof row.updated_at === 'string' ? row.updated_at : null,
+        name: cleanName(row.name),
+        car: cleanCar(row.car),
+        color: cleanColor(row.color, CARS[0].colors[0]),
+        best: toInt(row.best, 0, MAX_DISTANCE, 0),
+      };
     } catch (err) {
       return unexpected(err);
     }

@@ -1,0 +1,15 @@
+{
+  "name": "Lane Racer",
+  "short_name": "Lane Racer",
+  "description": "Endloses 3D-Autorennen mit fünf Welten, Garage, Tagesrennen und Party-Rennen mit Freunden.",
+  "lang": "de",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0E1117",
+  "theme_color": "#0E1117",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

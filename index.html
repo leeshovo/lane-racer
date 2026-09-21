@@ -29,9 +29,27 @@
   } }
   </script>
 
+  <!-- Alle Module gleichzeitig vorladen statt nacheinander (main.js entdeckt seine Imports sonst erst nach dem Download) -->
   <link rel="modulepreload" href="js/main.js">
+  <link rel="modulepreload" href="js/config.js">
+  <link rel="modulepreload" href="js/storage.js">
+  <link rel="modulepreload" href="js/bend.js">
+  <link rel="modulepreload" href="js/world.js">
+  <link rel="modulepreload" href="js/effects.js">
+  <link rel="modulepreload" href="js/audio.js">
+  <link rel="modulepreload" href="js/online.js">
+  <link rel="modulepreload" href="js/ui.js">
+  <link rel="modulepreload" href="js/game.js">
+  <link rel="modulepreload" href="js/cars.js">
+  <link rel="modulepreload" href="js/rng.js">
+  <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js">
+  <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.core.js">
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+
+  <!-- Installierbar als App (Handy: "Zum Startbildschirm hinzufügen") -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icon.svg">
 </head>
 <body>
   <!-- main.js hängt hier den WebGL-Canvas ein -->

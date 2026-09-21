@@ -28,6 +28,7 @@ const smoothing = (rate, dt) => 1 - Math.exp(-rate * dt);
 const ALL_LANES = LANE_X.map((_, i) => i);
 const MIDDLE_LANE = Math.floor(LANE_COUNT / 2);
 const TRAFFIC_BY_TYPE = Object.fromEntries(TRAFFIC.map((t) => [t.type, t]));
+const TRAFFIC_SPAWNABLE = TRAFFIC.filter((t) => t.weight > 0);
 const PLAYER_VISUAL = new THREE.Vector3(...PLAYER_SIZE);
 const PLAYER_HIT = PLAYER_VISUAL.clone().multiplyScalar(CONFIG.hitboxScale);
 const POWERUP_WEIGHTS = [
@@ -47,6 +48,28 @@ const tmpQuat = new THREE.Quaternion();
 const tmpScale = new THREE.Vector3();
 const COIN_BASE_ROTATION = new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0));
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
+
+/**
+ * Schwerlast-Konvoi: zwei Lkw dicht hintereinander, 15 m lang.
+ * Verhält sich nach außen wie ein einzelnes Fahrzeug (object, setHeadlights, update, dispose).
+ */
+function createConvoy() {
+  const front = createTrafficVehicle('truck', '#c1121f');
+  const rear = createTrafficVehicle('truck', '#e9ecef');
+  const object = new THREE.Group();
+  front.object.position.z = -3.9;
+  rear.object.position.z = 3.9;
+  object.add(front.object, rear.object);
+  return {
+    object,
+    size: new THREE.Vector3(2.35, 3.2, 15),
+    setHeadlights(on) { front.setHeadlights(on); rear.setHeadlights(on); },
+    setNitro() {},
+    setBrake() {},
+    update(dt, speed) { front.update(dt, speed); rear.update(dt, speed); },
+    dispose() { front.dispose(); rear.dispose(); },
+  };
+}
 
 export class Game {
   /**
@@ -141,6 +164,8 @@ export class Game {
     this.seed = seed;
     this.raceId = raceId;
     this.party = party;
+    this.rowsUntilEvent = this.rng.int(CONFIG.eventFirstRows[0], CONFIG.eventFirstRows[1]);
+    this.nextBossRow = CONFIG.bossFirstRow;
 
     // Auto-Sonderfähigkeiten
     if (this.car.perk === 'startShield') this.#setShield(true);
@@ -173,6 +198,62 @@ export class Game {
     this.audio.play('nitro');
     this.events.onNitro?.(true);
     return true;
+  }
+
+  /** Aktive Fähigkeit des Autos (Taste F/E). Gibt true zurück, wenn sie gezündet hat. */
+  useAbility() {
+    const a = this.car.ability;
+    if (!a || this.state !== 'playing' || this.abilityCooldown > 0 || this.abilityTime > 0) return false;
+    this.abilityCooldown = a.cooldown;
+    this.abilityTime = a.duration;
+    tmpPos.set(this.player.x, 1, 0);
+
+    switch (a.id) {
+      case 'boost':
+        this.nitro = Math.max(this.nitro, 0.6);
+        break;
+      case 'pulse':
+        // Alle Münzen der nächsten 50 m fliegen zum Auto – egal in welcher Spur
+        for (const coin of this.coins) if (coin.active && coin.z > -50 && coin.z < 3) coin.pulled = true;
+        break;
+      case 'repair':
+        this.#setShield(true);
+        break;
+      default:
+        break; // ram, phase, siren, overdrive wirken über abilityTime
+    }
+    this.effects.pickupFlash(tmpPos, '#ffffff');
+    this.audio.play(a.id === 'siren' ? 'nitro' : 'powerup');
+    this.events.onAbility?.(a);
+    return true;
+  }
+
+  #abilityIs(id) {
+    return this.abilityTime > 0 && this.car.ability?.id === id;
+  }
+
+  /** Nach Fähigkeiten, in denen man durch Autos fährt: kurze Schonzeit, damit man nicht in einem Wagen "aufwacht". */
+  #endAbility() {
+    const id = this.car.ability?.id;
+    if (id === 'phase' || id === 'hop') this.shieldGrace = Math.max(this.shieldGrace, 0.6);
+  }
+
+  /** Höhe beim Schwebesprung (Phantom X): rauf in einem Bogen, kurz oben, wieder runter. */
+  #hopHeight() {
+    if (!this.#abilityIs('hop')) return 0;
+    const duration = this.car.ability.duration;
+    const t = clamp(1 - this.abilityTime / duration, 0, 1);
+    return 3.9 * Math.pow(Math.sin(Math.PI * t), 0.55);
+  }
+
+  /** Fahren durch andere Autos ohne Schaden und ohne sie wegzuschleudern (Phasensprung, Schwebesprung). */
+  get #ghost() {
+    return this.#abilityIs('phase') || this.#abilityIs('hop');
+  }
+
+  /** Tempo des Verkehrs – bei aktiver Sirene fährt er deutlich schneller weg. */
+  get #trafficSpeed() {
+    return this.baseSpeed * CONFIG.trafficFactor * (this.#abilityIs('siren') ? 2.4 : 1);
   }
 
   setDebugHitboxes(on) {
@@ -208,6 +289,13 @@ export class Game {
       shield: this.shieldActive,
       magnet: this.magnetTimer,
       double: this.doubleTimer,
+      ability: this.car.ability ? {
+        id: this.car.ability.id,
+        name: this.car.ability.name,
+        ready: this.abilityCooldown <= 0 && this.abilityTime <= 0,
+        active: this.abilityTime > 0,
+        cooldownFrac: this.car.ability.cooldown > 0 ? clamp(this.abilityCooldown / this.car.ability.cooldown, 0, 1) : 0,
+      } : null,
     };
   }
 
@@ -251,7 +339,7 @@ export class Game {
 
     // Fahrzeug-Animationen (Räder, Flammen, Blaulicht …)
     this.vehicle.update(dt, this.player.speed);
-    const trafficSpeed = this.baseSpeed * CONFIG.trafficFactor;
+    const trafficSpeed = this.#trafficSpeed;
     for (const e of this.enemies) e.vehicle.update(dt, trafficSpeed);
 
     this.shake = Math.max(0, this.shake - dt * 1.6);
@@ -311,7 +399,7 @@ export class Game {
     if (this.lastRowZ - CONFIG.spawnZ >= this.nextRowSpacing) {
       this.#spawnRow(this.lastRowZ - this.nextRowSpacing);
     }
-    const relative = this.player.speed - this.baseSpeed * CONFIG.trafficFactor;
+    const relative = this.player.speed - this.#trafficSpeed;
     this.#moveTraffic(dt, relative);
     this.#updatePickups(dt, relative);
     this.#checkCollisions();
@@ -329,7 +417,7 @@ export class Game {
     obj.position.y = Math.max(0, Math.sin(Math.min(this.crashTime * 5, Math.PI)) * 0.6);
 
     // Verkehr vor dem Wrack fährt weiter, dahinter bleibt er stehen
-    const relative = p.speed - this.baseSpeed * CONFIG.trafficFactor;
+    const relative = p.speed - this.#trafficSpeed;
     for (const e of this.enemies) {
       if (e.object.position.z < 0) e.object.position.z += relative * dt;
       this.#updateEnemyBox(e);
@@ -347,7 +435,8 @@ export class Game {
   #updateSpeed(dt) {
     const p = this.player;
     const stats = this.car.stats;
-    const maxNormal = this.baseSpeed * CONFIG.boostFactor * stats.speed;
+    const overdrive = this.#abilityIs('overdrive') ? 1.3 : 1;
+    const maxNormal = this.baseSpeed * CONFIG.boostFactor * stats.speed * overdrive;
     const minSpeed = this.baseSpeed * CONFIG.brakeFactor;
 
     if (this.launching) {
@@ -357,7 +446,7 @@ export class Game {
     } else if (this.nitroActive) {
       p.speed = approach(p.speed, maxNormal * CONFIG.nitroSpeedFactor, 45 * dt);
     } else if (p.gas && !p.brake) {
-      p.speed += CONFIG.acceleration * dt;
+      p.speed += CONFIG.acceleration * overdrive * dt;
     } else if (p.brake && !p.gas) {
       p.speed -= CONFIG.braking * dt;
     } else {
@@ -385,7 +474,7 @@ export class Game {
     obj.position.x = p.x;
     obj.rotation.y = clamp(-p.vx * 0.012, -0.35, 0.35); // Nase in Lenkrichtung
     obj.rotation.z = clamp(p.vx * 0.003, -0.08, 0.08);  // Karosserie neigt sich nach außen
-    if (this.state !== 'crashed') obj.position.y = 0;
+    if (this.state !== 'crashed') obj.position.y = this.#hopHeight();
   }
 
   #updatePlayerBox() {
@@ -410,6 +499,11 @@ export class Game {
     this.shieldGrace = Math.max(0, this.shieldGrace - dt);
     this.magnetTimer = Math.max(0, this.magnetTimer - dt);
     this.doubleTimer = Math.max(0, this.doubleTimer - dt);
+    this.abilityCooldown = Math.max(0, this.abilityCooldown - dt);
+    if (this.abilityTime > 0) {
+      this.abilityTime = Math.max(0, this.abilityTime - dt);
+      if (this.abilityTime === 0) this.#endAbility();
+    }
     if (this.combo > 0) {
       this.comboTimer -= dt;
       if (this.comboTimer <= 0) this.combo = 0;
@@ -417,7 +511,7 @@ export class Game {
   }
 
   get #invulnerable() {
-    return this.nitroActive || this.nitroGrace > 0 || this.shieldGrace > 0;
+    return this.nitroActive || this.nitroGrace > 0 || this.shieldGrace > 0 || this.#abilityIs('ram');
   }
 
   #setShield(on) {
@@ -438,32 +532,72 @@ export class Game {
    */
   #spawnRow(z) {
     const rng = this.rng;
+    this.rowIndex += 1;
+    const ev = this.#advanceEvent(z);
+    const isBoss = this.rowIndex === this.nextBossRow;
+    if (isBoss) this.nextBossRow += rng.int(CONFIG.bossGapRows[0], CONFIG.bossGapRows[1]);
+
     this.safeLane = clamp(this.safeLane + rng.int(-1, 1), 0, LANE_COUNT - 1);
 
-    const doubleChance = lerp(CONFIG.doubleChanceStart, CONFIG.doubleChanceEnd, this.difficulty);
+    let doubleChance = lerp(CONFIG.doubleChanceStart, CONFIG.doubleChanceEnd, this.difficulty);
+    if (ev === 'rush') doubleChance = Math.min(0.85, doubleChance + CONFIG.rushDoubleBonus);
     let count = rng.chance(doubleChance) ? 2 : 1;
     if (count === 2 && this.freeLanes.some((lane) => Math.abs(lane - this.safeLane) > 1)) count = 1;
+    if (isBoss) count = 1; // Der Konvoi blockiert genau eine Spur
 
     const blocked = rng.shuffle(ALL_LANES.filter((i) => i !== this.safeLane)).slice(0, count);
-    for (const lane of blocked) this.#spawnEnemy(lane, z);
+    for (const lane of blocked) this.#spawnEnemy(lane, z, isBoss ? 'boss' : null);
     this.freeLanes = ALL_LANES.filter((i) => !blocked.includes(i));
+    if (isBoss) this.eventMarkers.push({ z, type: 'boss', phase: 'start' }); // Warnung kurz vor dem Konvoi
 
     // Belohnungen liegen immer in der garantiert freien Spur
-    if (rng.chance(CONFIG.powerupChance)) {
+    if (ev === 'gold') {
+      this.#spawnCoinLine(this.safeLane, z, CONFIG.goldCoinsPerLine);
+    } else if (rng.chance(CONFIG.powerupChance)) {
       this.#spawnPowerup(rng.weighted(POWERUP_WEIGHTS).type, this.safeLane, z);
     } else if (rng.chance(CONFIG.coinLineChance)) {
       this.#spawnCoinLine(this.safeLane, z);
     }
 
     this.lastRowZ = z;
-    const base = lerp(CONFIG.rowSpacingStart, CONFIG.rowSpacingEnd, this.difficulty);
-    this.nextRowSpacing = base * (1 + rng.next() * CONFIG.rowSpacingJitter);
+    let base = lerp(CONFIG.rowSpacingStart, CONFIG.rowSpacingEnd, this.difficulty);
+    if (ev === 'rush') base *= CONFIG.rushSpacingFactor;
+    let spacing = base * (1 + rng.next() * CONFIG.rowSpacingJitter);
+    // Fairness: Vor und hinter dem 15 m langen Konvoi extra Platz zum Spurwechseln
+    if (isBoss || this.rowIndex + 1 === this.nextBossRow) spacing += CONFIG.bossExtraSpacing;
+    this.nextRowSpacing = spacing;
   }
 
-  #spawnEnemy(lane, z) {
-    const def = this.rng.weighted(TRAFFIC);
-    const color = def.type === 'taxi' ? '#f2c200' : def.type === 'police' ? '#f4f6fa' : this.rng.pick(TRAFFIC_COLORS);
-    const vehicle = createTrafficVehicle(def.type, color);
+  /**
+   * Ereignisplan: zählt Reihen (nicht Sekunden), damit alle Teilnehmer eines Party-Rennens
+   * dasselbe erleben. Gibt das Ereignis zurück, das für die neue Reihe gilt (oder null).
+   */
+  #advanceEvent(z) {
+    const rng = this.rng;
+    if (this.event) {
+      this.event.rowsLeft -= 1;
+      if (this.event.rowsLeft < 0) {
+        this.eventMarkers.push({ z, type: this.event.type, phase: 'end' });
+        this.event = null;
+        this.rowsUntilEvent = rng.int(CONFIG.eventGapRows[0], CONFIG.eventGapRows[1]);
+      }
+    } else {
+      this.rowsUntilEvent -= 1;
+      if (this.rowsUntilEvent <= 0) {
+        const type = rng.chance(0.5) ? 'gold' : 'rush';
+        this.event = { type, rowsLeft: rng.int(CONFIG.eventLengthRows[0], CONFIG.eventLengthRows[1]) };
+        this.eventMarkers.push({ z, type, phase: 'start' });
+      }
+    }
+    return this.event ? this.event.type : null;
+  }
+
+  #spawnEnemy(lane, z, forceType = null) {
+    // rng immer gleich oft ziehen, damit der Seed-Verlauf stabil bleibt
+    const def = forceType ? TRAFFIC_BY_TYPE[forceType] : this.rng.weighted(TRAFFIC_SPAWNABLE);
+    const paint = this.rng.pick(TRAFFIC_COLORS);
+    const color = def.type === 'taxi' ? '#f2c200' : def.type === 'police' ? '#f4f6fa' : paint;
+    const vehicle = def.type === 'boss' ? createConvoy() : createTrafficVehicle(def.type, color);
     vehicle.object.position.set(LANE_X[lane], 0, z);
     vehicle.setHeadlights(this.night);
     this.scene.add(vehicle.object);
@@ -512,6 +646,7 @@ export class Game {
   #moveTraffic(dt, relative) {
     const dz = relative * dt;
     this.lastRowZ += dz;
+    this.#announceEvents(dz);
     const halfPlayerL = PLAYER_VISUAL.z / 2;
     const halfPlayerW = PLAYER_VISUAL.x / 2;
 
@@ -537,9 +672,26 @@ export class Game {
         e.passed = true;
         this.overtakes += 1;
         if (e.minClearance < CONFIG.nearMissClearance) this.#nearMiss(e);
+        if (e.type === 'boss') {
+          this.coinsCollected += CONFIG.bossPassCoins;
+          this.events.onBoss?.({ phase: 'passed', coins: CONFIG.bossPassCoins });
+        }
       }
 
       this.#updateEnemyBox(e);
+    }
+  }
+
+  /** Kündigt Ereignisse an, sobald der Spieler ihnen nahe kommt (die Reihen entstehen ja schon 235 m voraus). */
+  #announceEvents(dz) {
+    for (let i = this.eventMarkers.length - 1; i >= 0; i--) {
+      const m = this.eventMarkers[i];
+      m.z += dz;
+      if (m.z > -75) {
+        this.eventMarkers.splice(i, 1);
+        if (m.type !== 'boss') this.liveEvent = m.phase === 'start' ? m.type : null;
+        this.events.onEvent?.({ type: m.type, phase: m.phase });
+      }
     }
   }
 
@@ -547,7 +699,7 @@ export class Game {
     this.nearMisses += 1;
     this.combo = this.combo > 0 ? Math.min(this.combo + 1, CONFIG.maxCombo) : 1;
     this.comboTimer = CONFIG.comboWindow;
-    const coins = CONFIG.nearMissCoins * this.combo;
+    const coins = CONFIG.nearMissCoins * this.combo * (this.liveEvent === 'rush' ? CONFIG.rushNearMissFactor : 1);
     this.nearMissCoins += coins;
 
     const fill = CONFIG.nitroFillNearMiss * (this.car.perk === 'nearMissPlus' ? 1.4 : 1);
@@ -565,6 +717,7 @@ export class Game {
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const e = this.enemies[i];
       if (!e.box.intersectsBox(this.player.box)) continue;
+      if (this.#ghost) continue; // Phasen-/Schwebesprung: einfach hindurch
 
       if (this.#invulnerable) {
         this.#smash(i);
@@ -595,17 +748,17 @@ export class Game {
     this.debris.push(e);
 
     this.smashed += 1;
-    const coins = CONFIG.smashCoins * (this.car.perk === 'smashPlus' ? 2 : 1);
+    const coins = (e.type === 'boss' ? CONFIG.bossSmashCoins : CONFIG.smashCoins) * (this.car.perk === 'smashPlus' ? 2 : 1);
     this.smashCoins += coins;
     this.shake = Math.min(1, this.shake + 0.45);
     tmpPos.copy(e.object.position).setY(1);
-    this.effects.explosion(tmpPos, { color: '#ff8a2a', scale: e.type === 'truck' ? 1.5 : 1 });
+    this.effects.explosion(tmpPos, { color: '#ff8a2a', scale: e.type === 'boss' ? 2.2 : e.type === 'truck' ? 1.5 : 1 });
     this.audio.play('smash');
     this.events.onSmash?.({ coins });
   }
 
   #updateDebris(dt) {
-    const relative = this.player.speed - this.baseSpeed * CONFIG.trafficFactor;
+    const relative = this.player.speed - this.#trafficSpeed;
     for (let i = this.debris.length - 1; i >= 0; i--) {
       const d = this.debris[i];
       const o = d.object;
@@ -665,8 +818,8 @@ export class Game {
     }]));
   }
 
-  #spawnCoinLine(lane, z) {
-    const n = CONFIG.coinsPerLine;
+  #spawnCoinLine(lane, z, length = CONFIG.coinsPerLine) {
+    const n = length;
     for (let i = 0; i < n; i++) {
       const coin = this.coins.find((c) => !c.active);
       if (!coin) return;
@@ -889,6 +1042,16 @@ export class Game {
     this.shake = 0;
     this.launching = false;
 
+    // Ereignisse (Goldrausch, Stoßverkehr), Konvoi und aktive Fähigkeit
+    this.rowIndex = 0;
+    this.event = null;          // { type: 'gold' | 'rush', rowsLeft }
+    this.rowsUntilEvent = 999;
+    this.nextBossRow = 0;
+    this.eventMarkers = [];     // Ereignisse, die noch angekündigt werden müssen
+    this.liveEvent = null;      // Ereignis, in dem der Spieler gerade fährt
+    this.abilityCooldown = 0;
+    this.abilityTime = 0;
+
     const p = this.player;
     p.lane = MIDDLE_LANE;
     p.x = LANE_X[MIDDLE_LANE];
@@ -932,7 +1095,9 @@ export class Game {
       nitroUses: this.nitroUses,
       raceId: this.raceId,
       party: this.party,
-      isPartyRace: Boolean(this.raceId),
+      isPartyRace: Boolean(this.raceId) && !String(this.raceId).startsWith('daily-'),
+      isDaily: Boolean(this.raceId) && String(this.raceId).startsWith('daily-'),
+      seed: this.seed,
       car: this.carId,
     };
   }

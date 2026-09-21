@@ -36,6 +36,7 @@ const NET_LABEL = { online: 'Online', connecting: 'Verbinde …', offline: 'Offl
 const LB_TABS = [
   { kind: 'global', label: 'Allzeit' },
   { kind: 'weekly', label: 'Diese Woche' },
+  { kind: 'daily', label: 'Heute' },
   { kind: 'party', label: 'Party' },
 ];
 const QUALITY_OPTIONS = [['auto', 'Auto'], ['high', 'Hoch'], ['medium', 'Mittel'], ['low', 'Niedrig']];
@@ -358,6 +359,7 @@ export class UI {
     this._hudLast = {
       kmh: NaN, level: 0, world: null, coins: NaN, nitro: NaN, ready: null, active: null,
       combo: -1, comboFrac: NaN, comboShow: null, live: null, race: null,
+      abilityOn: null, abilityName: '', abilityFrac: NaN, abilityState: '',
     };
     this._liveRows = [];
     this._liveOrder = [];
@@ -460,7 +462,7 @@ export class UI {
   }
 
   /** Hauptmenü: Rekord, gewähltes Auto, 3 Missionen, Party-Hinweis. */
-  renderMenu({ best = 0, car = null, missions = [], party = null } = {}) {
+  renderMenu({ best = 0, car = null, missions = [], party = null, daily = null } = {}) {
     const m = this.mn;
     m.best.set(best);
     const c = car && typeof car === 'object' ? car : null;
@@ -482,6 +484,7 @@ export class UI {
       m.partyCount.textContent = `${count} ${count === 1 ? 'Fahrer' : 'Fahrer'} · Lobby öffnen`;
     }
     m.partySub.textContent = code ? `Party ${code}` : 'mit Freunden';
+    if (typeof daily === 'string') m.dailySub.textContent = cleanText(daily, 40);
     m.bestTicker.textContent = best > 0 ? `Dein Rekord: ${fmtDist(best)} – schaffst du mehr?` : 'Noch kein Rekord – zeig, was du kannst';
   }
 
@@ -556,7 +559,7 @@ export class UI {
       lb.state.append(h('div', { class: 'empty' },
         icon('flag', 'empty__icon'),
         h('p', { class: 'empty__title' }, 'Noch keine Einträge – fahr los!'),
-        h('p', { class: 'empty__text' }, k === 'weekly' ? 'Die Wochenwertung startet jeden Montag neu.' : 'Der erste Platz ist noch frei.')));
+        h('p', { class: 'empty__text' }, k === 'weekly' ? 'Die Wochenwertung startet jeden Montag neu.' : k === 'daily' ? 'Heute ist noch niemand das Tagesrennen gefahren – sei der Erste!' : 'Der erste Platz ist noch frei.')));
     } else {
       lb.state.hidden = true;
       lb.list.hidden = false;
@@ -785,6 +788,35 @@ export class UI {
     this._updatePowerup(hd.pu.magnet, s.magnet === Infinity ? Infinity : num(s.magnet));
     this._updatePowerup(hd.pu.double, s.double === Infinity ? Infinity : num(s.double));
 
+    // Fähigkeit: lädt sich nach dem Einsatz wieder auf
+    const ab = s.ability && typeof s.ability === 'object' ? s.ability : null;
+    if (!!ab !== L.abilityOn) {
+      L.abilityOn = !!ab;
+      hd.ability.hidden = !ab;
+      this.tc.ability.hidden = !ab;
+    }
+    if (ab) {
+      if (ab.name !== L.abilityName) {
+        L.abilityName = ab.name;
+        const label = cleanText(ab.name, 24);
+        hd.abilityName.textContent = label;
+        this.tc.abilityText.textContent = label;
+        this.tc.ability.setAttribute('aria-label', `Fähigkeit ${label} einsetzen`);
+      }
+      const frac = ab.active || ab.ready ? 1 : 1 - clamp01(num(ab.cooldownFrac));
+      if (changed(frac, L.abilityFrac, 0.004)) {
+        L.abilityFrac = frac;
+        hd.abilityFill.style.transform = `scaleX(${frac.toFixed(3)})`;
+        this.tc.ability.style.setProperty('--n', frac.toFixed(3));
+      }
+      const state = ab.active ? 'active' : ab.ready ? 'ready' : 'charging';
+      if (state !== L.abilityState) {
+        L.abilityState = state;
+        hd.ability.dataset.state = state;
+        this.tc.ability.dataset.state = state;
+      }
+    }
+
     this._updateLive(s.live);
 
     const race = !!s.race;
@@ -792,6 +824,70 @@ export class UI {
       L.race = race;
       hd.race.hidden = !race;
     }
+  }
+
+  /** Sicherungscode-Bereich in den Einstellungen füllen. */
+  setRecoveryCode({ code = null, hasProgress = false, status = '' } = {}) {
+    const st = this.st;
+    this._recoveryCode = typeof code === 'string' ? code : '';
+    this._restoreNeedsConfirm = !!hasProgress;
+    st.cloudStatus.textContent = cleanText(status, 120);
+    st.codeShow.disabled = !this._recoveryCode;
+    st.codeCopy.disabled = !this._recoveryCode;
+    this._refreshRecoveryField();
+  }
+
+  _toggleRecoveryShown() {
+    this._recoveryShown = !this._recoveryShown;
+    this._refreshRecoveryField();
+  }
+
+  _refreshRecoveryField() {
+    const st = this.st;
+    const code = this._recoveryCode || '';
+    const shown = !!this._recoveryShown && !!code;
+    st.code.value = code ? (shown ? code : 'LR1-••••• ••••• ••••• •••••') : '';
+    st.codeShow.querySelector('.btn__label').textContent = shown ? 'Verbergen' : 'Anzeigen';
+  }
+
+  _onRestoreClick() {
+    const st = this.st;
+    const value = st.restoreInput.value.trim();
+    st.restoreMsg.dataset.state = '';
+    if (!value) {
+      st.restoreMsg.textContent = 'Füge zuerst den Sicherungscode ein.';
+      st.restoreInput.focus();
+      return;
+    }
+    // Wer schon Fortschritt hat, muss das Ersetzen bestätigen (zweiter Klick innerhalb von 6 s)
+    if (this._restoreNeedsConfirm && !this._restoreConfirm) {
+      this._restoreConfirm = true;
+      st.restoreLabel.textContent = 'Wirklich ersetzen?';
+      st.restoreMsg.textContent = 'Dein jetziger Spielstand auf diesem Gerät wird durch den gesicherten ersetzt.';
+      clearTimeout(this._restoreTimer);
+      this._restoreTimer = setTimeout(() => this._resetRestoreConfirm(), 6000);
+      return;
+    }
+    this._resetRestoreConfirm();
+    st.restoreBtn.disabled = true;
+    st.restoreMsg.textContent = 'Wird wiederhergestellt …';
+    this._call('onRestoreCode', value);
+  }
+
+  _resetRestoreConfirm() {
+    clearTimeout(this._restoreTimer);
+    this._restoreConfirm = false;
+    if (this.st) this.st.restoreLabel.textContent = 'Wiederherstellen';
+  }
+
+  /** Antwort auf onRestoreCode. */
+  setRestoreResult({ ok = false, message = '' } = {}) {
+    const st = this.st;
+    this._resetRestoreConfirm();
+    st.restoreBtn.disabled = false;
+    st.restoreMsg.textContent = cleanText(message, 200);
+    st.restoreMsg.dataset.state = ok ? 'ok' : 'error';
+    if (ok) st.restoreInput.value = '';
   }
 
   /** 3 | 2 | 1 | 'LOS!' | null */
@@ -1169,6 +1265,10 @@ export class UI {
     const left = tbtn('tbtn--steer', 'Spur nach links', icon('arrowLeft'));
     const right = tbtn('tbtn--steer', 'Spur nach rechts', icon('arrowRight'));
     const nitro = tbtn('tbtn--nitro', 'Nitro zünden', h('span', { class: 'tbtn__ring', 'aria-hidden': 'true' }), icon('bolt'), h('span', { class: 'tbtn__text' }, 'Nitro'));
+    const abilityText = h('span', { class: 'tbtn__text' }, 'Fähigkeit');
+    const ability = tbtn('tbtn--ability', 'Fähigkeit einsetzen', h('span', { class: 'tbtn__ring', 'aria-hidden': 'true' }), icon('target'), abilityText);
+    ability.hidden = true;
+    tap(ability, 'ability');
     const brake = tbtn('tbtn--brake', 'Bremse (halten)', h('span', { class: 'tbtn__text' }, 'Bremse'));
     const gas = tbtn('tbtn--gas', 'Gas (halten)', chevrons(), h('span', { class: 'tbtn__text' }, 'Gas'));
     tap(zoneLeft, 'left');
@@ -1182,10 +1282,10 @@ export class UI {
     const el = h('div', { class: 'touch', hidden: true },
       zoneLeft, zoneRight,
       h('div', { class: 'tpad tpad--steer' }, left, right),
-      h('div', { class: 'tpad tpad--drive' }, nitro, h('div', { class: 'tpad__row' }, brake, gas)));
+      h('div', { class: 'tpad tpad--drive' }, h('div', { class: 'tpad__row' }, ability, nitro), h('div', { class: 'tpad__row' }, brake, gas)));
     el.addEventListener('contextmenu', (e) => e.preventDefault());
     this.root.append(el);
-    this.tc = { el, nitro, gas, brake };
+    this.tc = { el, nitro, gas, brake, ability, abilityText };
   }
 
   // =========================================================================
@@ -1245,6 +1345,13 @@ export class UI {
     hd.comboFill = h('i', { class: 'combo__fill' });
     hd.combo = h('div', { class: 'combo', hidden: true },
       h('span', { class: 'combo__label' }, 'Kombo'), hd.comboMult, h('span', { class: 'combo__bar' }, hd.comboFill));
+    // Aktive Fähigkeit des Autos (Taste F oder E)
+    hd.abilityName = h('span', { class: 'ability__name' }, 'Fähigkeit');
+    hd.abilityFill = h('i', { class: 'ability__fill' });
+    hd.ability = h('div', { class: 'ability', hidden: true },
+      icon('target'), hd.abilityName,
+      h('kbd', { class: 'ability__key' }, 'F'),
+      h('span', { class: 'ability__bar', 'aria-hidden': 'true' }, hd.abilityFill));
     hd.nitroFill = h('i', { class: 'nitro__fill' });
     hd.nitro = h('div', { class: 'nitro' },
       h('div', { class: 'nitro__head' },
@@ -1255,6 +1362,7 @@ export class UI {
     const bottom = h('div', { class: 'hud-bottom' },
       h('div', { class: 'hud-pus' }, hd.pu.shield.el, hd.pu.magnet.el, hd.pu.double.el),
       hd.combo,
+      hd.ability,
       hd.nitro);
 
     const keys = h('p', { class: 'hud-keys', 'aria-hidden': 'true' },
@@ -1397,11 +1505,13 @@ export class UI {
     const garage = navBtn('car', 'Garage', 'Autos & Lacke', 'onOpenGarage');
     const board = navBtn('trophy', 'Rangliste', 'Weltweit & Woche', 'onOpenLeaderboard');
     const party = navBtn('users', 'Party', 'mit Freunden', 'onOpenParty', 'navbtn--party');
+    const daily = navBtn('flag', 'Tagesrennen', 'Neue Strecke jeden Tag', 'onOpenDaily', 'navbtn--daily');
+    m.dailySub = daily.subEl;
     const missions = navBtn('target', 'Missionen', 'Münzen verdienen', 'onOpenMissions');
     const settings = navBtn('sliders', 'Einstellungen', 'Sound & Grafik', 'onOpenSettings');
     m.partySub = party.subEl;
     const nav = h('nav', { class: 'menu__nav', 'aria-label': 'Hauptmenü' },
-      party.btn, garage.btn, board.btn, missions.btn, settings.btn);
+      daily.btn, party.btn, garage.btn, board.btn, missions.btn, settings.btn);
 
     m.partyCode = h('strong', { class: 'party-badge__code' });
     m.partyCount = h('span', { class: 'party-badge__count' });
@@ -1533,6 +1643,14 @@ export class UI {
         h('strong', null, perk ? perk.name : 'Kein Perk'),
         h('span', null, perk ? perk.text : 'Pure Werte, keine Extras.')));
 
+    // Aktive Fähigkeit (Taste F): Name, Wirkung und Abklingzeit
+    const ab = car.ability;
+    const abilityEl = ab ? h('p', { class: 'car__perk car__ability' },
+      icon('target'),
+      h('span', { class: 'car__perk-text' },
+        h('strong', null, `Fähigkeit: ${cleanText(ab.name, 30)}`),
+        h('span', null, `${cleanText(ab.text, 120)} (Abklingzeit ${fmtInt(ab.cooldown)} s)`))) : null;
+
     const swatches = (Array.isArray(car.colors) ? car.colors : []).map((color, i) => ({
       color,
       btn: h('button', {
@@ -1563,6 +1681,7 @@ export class UI {
       h('div', { class: 'car__body' },
         h('ul', { class: 'car__stats', 'aria-label': 'Werte' }, stats.map((s) => s.li)),
         perkEl,
+        abilityEl,
         h('p', { class: 'car__desc' }, cleanText(car.description, 200)),
         colorsEl,
         h('div', { class: 'car__actions' }, buy, select, activeTag),
@@ -2084,14 +2203,45 @@ export class UI {
         keyRow(['↑'], 'Gas geben'),
         keyRow(['↓'], 'Bremsen'),
         keyRow(['Leertaste'], 'Nitro zünden'),
+        keyRow(['F'], 'Auto-Fähigkeit einsetzen (oder E)'),
         keyRow(['P'], 'Pause'),
         keyRow(['M'], 'Ton an / aus')),
       h('p', { class: 'setting__desc' }, 'Am Handy: links/rechts tippen oder die Pfeile nutzen, dazu Gas, Bremse und Nitro.'));
+
+    // --- Spielstand sichern (Cloud) ---
+    st.cloudStatus = h('span', { class: 'setting__desc setting__status', role: 'status' }, 'Noch nicht gesichert');
+    st.code = h('input', {
+      id: 'lr-set-code', class: 'field__input field__input--code field__input--small', type: 'text', readonly: true, value: '',
+      spellcheck: 'false', autocomplete: 'off', placeholder: 'Wird nach dem Anmelden erzeugt', 'aria-label': 'Dein Sicherungscode',
+    });
+    st.codeShow = h('button', { type: 'button', class: 'btn btn--ghost btn--sm', onClick: () => this._toggleRecoveryShown() },
+      icon('lock'), h('span', { class: 'btn__label' }, 'Anzeigen'));
+    st.codeCopy = h('button', { type: 'button', class: 'btn btn--ghost btn--sm', onClick: () => this._call('onCopyRecovery') },
+      icon('copy'), h('span', { class: 'btn__label' }, 'Kopieren'));
+    st.restoreInput = h('input', {
+      id: 'lr-set-restore', class: 'field__input field__input--small', type: 'text', spellcheck: 'false', autocomplete: 'off',
+      autocapitalize: 'characters', placeholder: 'Code vom anderen Gerät einfügen', 'aria-label': 'Sicherungscode zum Wiederherstellen',
+    });
+    st.restoreLabel = h('span', { class: 'btn__label' }, 'Wiederherstellen');
+    st.restoreBtn = h('button', { type: 'button', class: 'btn btn--ghost btn--sm', onClick: () => this._onRestoreClick() },
+      icon('restart'), st.restoreLabel);
+    st.restoreMsg = h('p', { class: 'setting__desc setting__msg', role: 'status' });
+    const cloudRow = h('div', { class: 'setting setting--cloud' },
+      h('span', { class: 'setting__text' },
+        h('span', { class: 'setting__label' }, 'Spielstand sichern'),
+        h('span', { class: 'setting__desc' }, 'Münzen, Autos und Missionen werden automatisch online gesichert. Mit dem Sicherungscode holst du sie auf einem anderen Gerät zurück. Behandle ihn wie ein Passwort und gib ihn nicht weiter.'),
+        st.cloudStatus),
+      h('div', { class: 'cloud__row' }, st.code, st.codeShow, st.codeCopy),
+      h('div', { class: 'cloud__row' }, st.restoreInput, st.restoreBtn),
+      st.restoreMsg);
+    st.codeShow.disabled = true;
+    st.codeCopy.disabled = true;
 
     this._sheet('settings', { kicker: 'Optionen', title: 'Einstellungen' },
       h('div', { class: 'sheet__body' },
         h('div', { class: 'settings-group' }, music.row, sfx.row, volumeRow),
         h('div', { class: 'settings-group' }, qualityRow, nameRow),
+        h('div', { class: 'settings-group' }, cloudRow),
         h('div', { class: 'settings-group' }, controls),
         h('p', { class: 'version' }, `Lane Racer ${VERSION} · three.js · Supabase`)));
     this.st = st;
@@ -2156,6 +2306,8 @@ export class UI {
       g.again,
       h('button', { type: 'button', class: 'btn btn--ghost', onClick: guard(() => this._call('onOpenGarage')) },
         icon('car'), h('span', { class: 'btn__label' }, 'Garage')),
+      h('button', { type: 'button', class: 'btn btn--ghost', onClick: guard(() => this._call('onChallenge')) },
+        icon('flag'), h('span', { class: 'btn__label' }, 'Herausfordern')),
       h('button', { type: 'button', class: 'btn btn--ghost', onClick: guard(() => this._call('onToMenu')) },
         icon('menu'), h('span', { class: 'btn__label' }, 'Menü')));
 

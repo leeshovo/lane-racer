@@ -1,7 +1,10 @@
 /*
  * storage.js – lokaler Spielstand (Münzen, Garage, Missionen, Einstellungen).
- * Liegt im localStorage dieses Browsers. Online-Identität (Name, Token) wird
+ * Liegt im localStorage dieses Browsers. Online-Identität (ID + Geheimnis) wird
  * hier ebenfalls abgelegt, damit man beim nächsten Besuch wiedererkannt wird.
+ *
+ * Zusätzlich gibt es einen "Snapshot" des Spielstands, der in der Cloud
+ * gesichert und auf einem anderen Gerät wiederhergestellt werden kann.
  */
 import { CARS, MISSION_POOL, CONFIG, carById } from './config.js';
 
@@ -17,29 +20,27 @@ export function defaultProfile() {
     selectedCar: 'blitz',
     colors: Object.fromEntries(CARS.map((c) => [c.id, c.colors[0]])),
     best: 0,
-    stats: { runs: 0, totalDistance: 0, totalCoins: 0, nearMisses: 0, smashed: 0, overtakes: 0, partyRaces: 0 },
+    stats: { runs: 0, totalDistance: 0, totalCoins: 0, nearMisses: 0, smashed: 0, overtakes: 0, partyRaces: 0, dailyRuns: 0 },
     missions: [],
     missionTier: {},
+    daily: { key: '', best: 0 }, // bester Versuch im Tagesrennen des Tages "key" (YYYYMMDD)
     settings: { music: true, sfx: true, volume: 0.8, quality: 'auto' },
     online: null, // { id, secret } nach der Registrierung
   };
 }
 
-/** Lädt den Spielstand und ergänzt fehlende Felder (z. B. nach Updates). */
-export function loadProfile() {
+/** Bringt beliebige gespeicherte Daten in die aktuelle Form (fehlende Felder ergänzen, Unsinn entfernen). */
+function normalize(stored) {
   const base = defaultProfile();
-  let stored = null;
-  try {
-    stored = JSON.parse(localStorage.getItem(KEY) || 'null');
-  } catch (err) {
-    stored = null;
-  }
   if (!stored || typeof stored !== 'object') return ensureMissions(base);
 
   const p = { ...base, ...stored };
   p.stats = { ...base.stats, ...(stored.stats || {}) };
+  for (const k of Object.keys(base.stats)) p.stats[k] = Math.max(0, Math.floor(Number(p.stats[k]) || 0));
   p.settings = { ...base.settings, ...(stored.settings || {}) };
   p.colors = { ...base.colors, ...(stored.colors || {}) };
+  // Nur erlaubte Lackfarben der jeweiligen Autos übernehmen
+  for (const car of CARS) if (!car.colors.includes(p.colors[car.id])) p.colors[car.id] = car.colors[0];
   p.missionTier = { ...(stored.missionTier || {}) };
   p.owned = Array.isArray(stored.owned) ? stored.owned.filter((id) => CARS.some((c) => c.id === id)) : ['blitz'];
   if (!p.owned.includes('blitz')) p.owned.unshift('blitz');
@@ -48,7 +49,22 @@ export function loadProfile() {
   p.best = Math.max(0, Math.floor(Number(p.best) || 0));
   p.missions = Array.isArray(stored.missions) ? stored.missions.filter((m) => MISSION_POOL.some((d) => d.id === m.id)) : [];
   if (p.online && !(p.online.id && p.online.secret)) p.online = null;
+  const d = stored.daily;
+  p.daily = d && typeof d.key === 'string' && /^[0-9]{8}$/.test(d.key)
+    ? { key: d.key, best: Math.max(0, Math.floor(Number(d.best) || 0)) }
+    : base.daily;
   return ensureMissions(p);
+}
+
+/** Lädt den Spielstand aus dem Browser. */
+export function loadProfile() {
+  let stored = null;
+  try {
+    stored = JSON.parse(localStorage.getItem(KEY) || 'null');
+  } catch (err) {
+    stored = null;
+  }
+  return normalize(stored);
 }
 
 export function saveProfile(profile) {
@@ -58,6 +74,47 @@ export function saveProfile(profile) {
   } catch (err) {
     return false; // z. B. privater Modus – Spiel läuft trotzdem
   }
+}
+
+// ---------------------------------------------------------------------------
+// Cloud-Snapshot
+// ---------------------------------------------------------------------------
+
+/** Der Teil des Spielstands, der in die Cloud wandert (ohne Name, Geheimnis und Geräte-Einstellungen). */
+export function snapshotOf(profile) {
+  return {
+    v: 2,
+    coins: profile.coins,
+    owned: [...profile.owned],
+    selectedCar: profile.selectedCar,
+    colors: { ...profile.colors },
+    best: profile.best,
+    stats: { ...profile.stats },
+    missions: profile.missions.map((m) => ({ ...m })),
+    missionTier: { ...profile.missionTier },
+  };
+}
+
+/**
+ * Wie weit ist dieser Spielstand? Lebenslang verdiente Münzen wachsen nie zurück
+ * (anders als das Guthaben nach einem Autokauf) – damit lässt sich "neuer" eindeutig erkennen.
+ */
+export function progressOf(data) {
+  const s = data && data.stats ? data.stats : {};
+  return (Number(s.totalCoins) || 0) * 1000 + (Number(s.runs) || 0);
+}
+
+/** Übernimmt einen Cloud-Snapshot in das lokale Profil (Name, Einstellungen und Online-ID bleiben). */
+export function adoptSnapshot(profile, data) {
+  const merged = normalize({
+    ...data,
+    name: profile.name,
+    settings: profile.settings,
+    online: profile.online,
+    daily: profile.daily,
+  });
+  Object.assign(profile, merged);
+  return profile;
 }
 
 // ---------------------------------------------------------------------------
@@ -135,7 +192,7 @@ export function ensureMissions(profile) {
 
 /**
  * @param run {distance, coinsCollected, nearMisses, nearMissCoins, smashed,
- *             smashCoins, overtakes, level, nitroUses, isPartyRace}
+ *             smashCoins, overtakes, level, nitroUses, isPartyRace, isDaily}
  * @returns {{breakdown, total, completed: Array<mission>, newBest: boolean}}
  */
 export function applyRun(profile, run) {
@@ -161,6 +218,7 @@ export function applyRun(profile, run) {
   s.smashed += run.smashed || 0;
   s.overtakes += run.overtakes || 0;
   if (run.isPartyRace) s.partyRaces += 1;
+  if (run.isDaily) s.dailyRuns += 1;
 
   // Missionen
   const runValues = {
@@ -174,6 +232,7 @@ export function applyRun(profile, run) {
     smashed: run.smashed || 0,
     overtakes: run.overtakes || 0,
     partyRaces: run.isPartyRace ? 1 : 0,
+    dailyRuns: run.isDaily ? 1 : 0,
   };
   const completed = [];
   profile.missions = profile.missions.filter((m) => {
