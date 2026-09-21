@@ -129,8 +129,16 @@ try {
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('p');
   check(await page.evaluate(() => window.laneRacer.app.paused === true), 'Pause mit P');
+  check(await page.evaluate(() => !document.querySelector('.pause').hidden), 'Pause-Fenster sichtbar');
+  await page.evaluate(() => [...document.querySelectorAll('.pause button')].find((b) => /einstellungen/i.test(b.textContent)).click());
+  check(await page.evaluate(() => window.laneRacer.app.screen === 'settings' && window.laneRacer.app.paused), 'Einstellungen aus der Pause öffnen (Spiel bleibt pausiert)');
+  await page.keyboard.press('Escape');
+  check(await page.evaluate(() => window.laneRacer.app.screen === 'hud' && !document.querySelector('.pause').hidden), 'Esc führt zurück zur Pause');
   await page.keyboard.press('p');
-  check(await page.evaluate(() => window.laneRacer.app.paused === false), 'Weiterfahren');
+  await page.waitForFunction(() => window.laneRacer.app.resumeAt > 0);
+  check(await page.evaluate(() => window.laneRacer.app.paused === true), 'Nach "Weiter" zählt es erst rückwärts (Spiel steht noch)');
+  await page.waitForFunction(() => window.laneRacer.app.paused === false, null, { timeout: 30000 });
+  check(true, 'Nach 3 Sekunden geht es weiter');
   // Runde beenden: gegen Verkehr rasen lassen
   await page.evaluate(() => { window.laneRacer.game.setGas(true); });
   await page.waitForFunction(() => ['crashed', 'over'].includes(window.laneRacer.game.state), null, { timeout: 90000 }).catch(() => {});

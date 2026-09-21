@@ -57,6 +57,10 @@ Bremse, Nitro und Fähigkeit.
 - **Fair by design:** In jeder Gegner-Reihe bleibt mindestens eine Spur frei, und von jeder freien Spur
   reicht ein Spurwechsel für die nächste Reihe. Um den Konvoi herum gibt es extra Platz.
 
+## Pause
+
+Mit **P** oder **Esc** (am Handy: Pause-Knopf) hält das Spiel an. In der Pause gibt es *Weiter*, *Einstellungen*, *Neustart* und *Zum Menü*. Die Einstellungen lassen sich also auch mitten in der Fahrt ändern; *Zurück* führt wieder zur Pause. Nach *Weiter* zählt es **3 – 2 – 1** rückwärts, bevor die Fahrt weitergeht (nochmal P/Esc bricht ab und pausiert erneut).
+
 ## Einstellungen
 
 Im Hauptmenü unter **Einstellungen** (im Spiel auch über die Pause). Sie sind in Reiter unterteilt:

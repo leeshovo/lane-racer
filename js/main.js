@@ -63,6 +63,9 @@ const app = {
   lastRun: null,        // { seed, distance } der letzten Runde (für "Herausfordern")
   cloud: { savedAt: null, timer: 0 },
   tutorial: null,       // Tipps der ersten Runde (null = keine)
+  resumeAt: 0,          // Zeitpunkt (ms), an dem es nach der Pause weitergeht (0 = kein Rückwärtszählen läuft)
+  resumeShown: 0,       // zuletzt angezeigte Zahl des Rückwärtszählens
+  settingsFromPause: false, // Einstellungen wurden aus der Pause geöffnet (Zurück führt zur Pause)
   friendCode: null,     // eigener Freundescode (vom Server, wird beim ersten Öffnen der Freunde-Liste geholt)
   pendingFriend: friendCodeFromUrl(), // ?friend=CODE aus dem Einladungslink
 };
@@ -108,6 +111,7 @@ const input = createInput({
   setPaused: (paused) => setPaused(paused),
   startRun: (options) => startRun(options),
   toMenu: () => toMenu(),
+  goBack: () => goBack(),
 });
 
 // ===========================================================================
@@ -126,7 +130,8 @@ const ui = new UI({
     onOpenParty: () => openParty(),
     onOpenMissions: () => openMissions(),
     onOpenSettings: () => openSettings(),
-    onBack: () => toMenu(),
+    onBack: () => goBack(),
+    onPauseSettings: () => openPauseSettings(),
     onPreviewCar: (carId) => previewCar(carId),
     onBuyCar: (carId) => purchaseCar(carId),
     onSelectCar: (carId) => chooseCar(carId),
@@ -271,6 +276,7 @@ function frame(now) {
   // Zeitschritt in Sekunden: nie negativ (falls die Zeitachse springt) und höchstens 50 ms (nach Rucklern)
   const dt = clamp((now - lastTime) / 1000, 0, 0.05);
   lastTime = now;
+  if (app.resumeAt) tickResume(now);
 
   const running = !app.paused;
   if (running) {
@@ -490,6 +496,8 @@ function renderMenu() {
 function toMenu() {
   app.lastStart = null;
   app.challenge = null;
+  cancelResume();
+  app.settingsFromPause = false;
   app.paused = false;
   ui.showPause(false);
   audio.setPaused(false);
@@ -1155,6 +1163,8 @@ function registerServiceWorker() {
 // ===========================================================================
 function startRun({ seed, raceId = null, countdown, challenge = null, remember = false }) {
   unlockAudio();
+  cancelResume();
+  app.settingsFromPause = false;
   app.paused = false;
   ui.showPause(false);
   audio.setPaused(false);
@@ -1385,17 +1395,80 @@ function replayTutorial() {
   ui.toast('Tipps aktiviert', 'In deiner nächsten Solo-Runde erscheinen die Tipps wieder.', 'info');
 }
 
+const RESUME_MS = 3000; // so lange zählt es nach der Pause rückwärts, bevor es weitergeht
+
+/**
+ * Pause an/aus. Beim Weiterfahren läuft erst ein Rückwärtszählen (3-2-1), damit man sich wieder sammeln kann.
+ * Wird währenddessen noch einmal pausiert (P, Esc, Fenster verlassen), geht es zurück in die Pause.
+ */
 function setPaused(paused) {
   const inRun = game.state === 'playing' || game.state === 'countdown';
-  if (paused && (!inRun || app.paused)) return;
-  if (!paused && !app.paused) return;
-  app.paused = paused;
   if (paused) {
+    if (!inRun || (app.paused && !app.resumeAt)) return;
+    cancelResume();
+    app.paused = true;
     game.setGas(false);
     game.setBrake(false);
+    ui.showPause(true);
+    audio.setPaused(true);
+    return;
   }
-  ui.showPause(paused);
-  audio.setPaused(paused);
+  if (!app.paused) return;
+  if (app.resumeAt) {
+    setPaused(true); // P/Esc während des Zählens = wieder pausieren
+    return;
+  }
+  ui.showPause(false);
+  app.resumeAt = performance.now() + RESUME_MS;
+  app.resumeShown = 0;
+}
+
+function cancelResume() {
+  if (!app.resumeAt) return;
+  app.resumeAt = 0;
+  app.resumeShown = 0;
+  ui.showCountdown(null);
+}
+
+/** Läuft jedes Bild, solange das Rückwärtszählen nach der Pause aktiv ist. */
+function tickResume(now) {
+  const left = app.resumeAt - now;
+  if (left <= 0) {
+    app.resumeAt = 0;
+    app.resumeShown = 0;
+    app.paused = false;
+    audio.setPaused(false);
+    ui.showCountdown(null);
+    return;
+  }
+  const n = Math.ceil(left / 1000);
+  if (n !== app.resumeShown) {
+    app.resumeShown = n;
+    ui.showCountdown(n);
+    audio.play('countdown');
+  }
+}
+
+/** Einstellungen aus der Pause heraus: Zurück führt wieder zur Pause, nicht ins Menü. */
+function openPauseSettings() {
+  if (!app.paused || app.resumeAt) return;
+  app.settingsFromPause = true;
+  ui.showPause(false);
+  ui.renderSettings(profile.settings);
+  cloud.refreshRecoveryUi();
+  app.screen = 'settings';
+  ui.showScreen('settings');
+}
+
+function goBack() {
+  if (!app.settingsFromPause) {
+    toMenu();
+    return;
+  }
+  app.settingsFromPause = false;
+  app.screen = 'hud';
+  ui.showScreen('hud');
+  ui.showPause(true);
 }
 
 // ===========================================================================

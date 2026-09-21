@@ -92,7 +92,7 @@ export class UI {
    *   onSelectColor, onSubmitName, onRename, onLeaderboardTab, onCreateParty,
    *   onJoinParty, onLeaveParty, onStartRace, onCopyInvite, onShareInvite, onEmote, onChat,
    *   onFriendAdd, onFriendCopy, onFriendShare, onFriendRemove, onOpenFriends, onPartyFriend,
-   *   onSettingsChange, onPause, onResume, onRestart, onToMenu, onTouch, onUiSound
+   *   onSettingsChange, onPause, onResume, onPauseSettings, onRestart, onToMenu, onTouch, onUiSound
    */
   constructor({ root, callbacks } = {}) {
     let el = root || document.getElementById('ui');
@@ -2620,6 +2620,8 @@ export class UI {
       h('p', { class: 'pause__hint' }, 'Kurz durchatmen.', h('span', { class: 'pause__keys' }, ' Weiter mit ', h('kbd', null, 'P'), ' oder ', h('kbd', null, 'Esc'))),
       h('div', { class: 'pause__actions' },
         pz.resume,
+        h('button', { type: 'button', class: 'btn btn--ghost btn--block', onClick: () => this._call('onPauseSettings') },
+          icon('sliders'), h('span', { class: 'btn__label' }, 'Einstellungen')),
         h('button', { type: 'button', class: 'btn btn--ghost btn--block', onClick: () => this._call('onRestart') },
           icon('restart'), h('span', { class: 'btn__label' }, 'Neustart')),
         h('button', { type: 'button', class: 'btn btn--ghost btn--block', onClick: () => this._call('onToMenu') },

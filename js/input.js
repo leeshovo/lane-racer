@@ -3,7 +3,7 @@
  *
  * Aus main.js herausgelöst. createInput(ctx) hängt die Tastatur-Ereignisse ein und liefert handleTouch()
  * für die Knöpfe auf dem Handy. ctx: game (Getter), app, profile, ui und die Rückrufe
- * unlockAudio, changeSettings, setPaused, startRun, toMenu.
+ * unlockAudio, changeSettings, setPaused, startRun, toMenu, goBack.
  */
 
 /** Einheitlicher Tastenname; manche Umgebungen liefern event.code leer. */
@@ -68,6 +68,14 @@ export function createInput(ctx) {
     }
 
     if (app.paused) {
+      // Einstellungen aus der Pause: Esc geht zurück zur Pause (statt weiterzufahren)
+      if (app.screen === 'settings') {
+        if (code === 'Escape' && !event.repeat) {
+          event.preventDefault();
+          ctx.goBack();
+        }
+        return;
+      }
       if (!event.repeat && ['KeyP', 'Escape', 'Enter'].includes(code)) {
         event.preventDefault();
         ctx.setPaused(false);
@@ -88,7 +96,7 @@ export function createInput(ctx) {
       event.preventDefault();
       ctx.startRun({});
     } else if (app.screen !== 'menu' && app.screen !== 'hud' && code === 'Escape' && !event.repeat) {
-      ctx.toMenu();
+      ctx.goBack();
     }
   });
 
