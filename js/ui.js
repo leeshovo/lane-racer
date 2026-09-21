@@ -27,12 +27,13 @@ import {
 // ===========================================================================
 // Konstanten
 // ===========================================================================
-const SCREENS = ['loading', 'menu', 'garage', 'leaderboard', 'party', 'missions', 'settings', 'hud', 'gameover'];
-const TOPBAR_SCREENS = new Set(['menu', 'garage', 'leaderboard', 'party', 'missions', 'settings']);
+const SCREENS = ['loading', 'menu', 'campaign', 'garage', 'leaderboard', 'party', 'missions', 'settings', 'hud', 'gameover'];
+const TOPBAR_SCREENS = new Set(['menu', 'campaign', 'garage', 'leaderboard', 'party', 'missions', 'settings']);
 
 // Gleiche Grenze wie main.js (Kamera-Layout): darunter Handy-Layout mit Bottom-Sheet
 const PHONE_QUERY = '(max-width: 899.98px)';
 
+const TIME_TAG = { dawn: 'Morgen', day: 'Mittag', dusk: 'Abend', night: 'Nacht' };
 const MODEL_LABEL = {
   coupe: 'Sportcoupé', hatch: 'Kleinwagen', muscle: 'Muscle-Car', pickup: 'Pick-up',
   police: 'Abfangjäger', gt: 'Supersportler', formula: 'Formelwagen', hover: 'Schwebegleiter',
@@ -54,6 +55,7 @@ const BREAKDOWN_ROWS = [
   ['distance', 'Strecke', true],
   ['perk', 'Bonus', false],
   ['missions', 'Missionen', false],
+  ['campaign', 'Kampagne', false],
   ['streak', 'Tagesserie', false],
   ['achievements', 'Erfolge', false],
 ];
@@ -92,6 +94,7 @@ export class UI {
    *   onSelectColor, onSubmitName, onRename, onLeaderboardTab, onCreateParty,
    *   onJoinParty, onLeaveParty, onStartRace, onCopyInvite, onShareInvite, onEmote, onChat,
    *   onFriendAdd, onFriendCopy, onFriendShare, onFriendRemove, onOpenFriends, onPartyFriend,
+   *   onOpenCampaign, onStartMap, onNextMap,
    *   onSettingsChange, onPause, onResume, onPauseSettings, onRestart, onToMenu, onTouch, onUiSound
    */
   constructor({ root, callbacks } = {}) {
@@ -148,6 +151,7 @@ export class UI {
     this._buildLeaderboard();
     this._buildParty();
     this._buildMissions();
+    this._buildCampaign();
     this._buildSettings();
     this._buildGameOver();
     this._buildTopBar();
@@ -233,8 +237,9 @@ export class UI {
   }
 
   /** Hauptmenü: Rekord, gewähltes Auto, 3 Missionen, Party-Hinweis. */
-  renderMenu({ best = 0, car = null, missions = [], party = null, daily = null, rejoin = '' } = {}) {
+  renderMenu({ best = 0, car = null, missions = [], party = null, daily = null, rejoin = '', campaign = null } = {}) {
     const m = this.mn;
+    if (campaign && m.campaignSub) m.campaignSub.textContent = `Stufe ${campaign.level} · ${campaign.stars}/${campaign.maxStars} ★`;
     m.best.set(best);
     const c = car && typeof car === 'object' ? car : null;
     const perk = c && c.perk ? PERKS[c.perk] : null;
@@ -514,6 +519,7 @@ export class UI {
     if (!s) return;
     const hd = this.hd;
     const L = this._hudLast;
+    this._updateGoalHud(s.campaign);
 
     hd.dist.set(s.distance);
 
@@ -836,9 +842,14 @@ export class UI {
     const g = this.go;
     const d = this.goData;
 
-    g.tag.textContent = d.race ? 'Ziel' : 'Crash';
-    g.tag.classList.toggle('tag--teal', !!d.race);
-    g.title.textContent = d.race ? 'Rennen vorbei' : 'Runde vorbei';
+    const camp = d.campaign && typeof d.campaign === 'object' ? d.campaign : null;
+    const finished = Boolean(camp && camp.evaluation && camp.evaluation.finished);
+    g.tag.textContent = camp ? (finished ? 'Ziel' : 'Crash') : d.race ? 'Ziel' : 'Crash';
+    g.tag.classList.toggle('tag--teal', !!d.race || finished);
+    g.tag.classList.toggle('tag--danger', !d.race && !finished);
+    g.title.textContent = camp ? (finished ? `${cleanText(camp.map.name, 30)} geschafft` : `${cleanText(camp.map.name, 30)} – knapp daneben`) : d.race ? 'Rennen vorbei' : 'Runde vorbei';
+    g.challenge.hidden = Boolean(camp);
+    this._renderGoCampaign(camp);
 
     const bd = (d.coins && d.coins.breakdown) || {};
     for (const row of g.rows) row.el.hidden = !(row.always || num(bd[row.key]) > 0);
@@ -1146,10 +1157,19 @@ export class UI {
       h('span', { class: 'hud-level__tag' }, 'Lvl'), hd.levelNum,
       h('span', { class: 'pips', 'aria-hidden': 'true' }, hd.pips), hd.world);
     hd.race = h('span', { class: 'hud-race', hidden: true }, icon('flag'), 'Party-Rennen');
+    // Kampagne: Fortschritt zum Ziel und die beiden Zusatzaufgaben
+    hd.goalName = h('span', { class: 'hud-goal__name' });
+    hd.goalFill = h('i', { class: 'hud-goal__fill' });
+    hd.goalList = h('ul', { class: 'hud-goal__list' });
+    hd.goalBox = h('div', { class: 'hud-goal', hidden: true, 'aria-hidden': 'true' },
+      h('div', { class: 'hud-goal__head' }, icon('flag'), hd.goalName),
+      h('div', { class: 'hud-goal__bar' }, hd.goalFill), hd.goalList);
+    hd.goalSig = '';
     const topLeft = h('div', { class: 'hud-tl' },
       h('div', { class: 'hud-dist' }, hd.dist.el, h('span', { class: 'hud-dist__unit' }, 'm')),
       hd.levelBox,
-      hd.race);
+      hd.race,
+      hd.goalBox);
 
     hd.speed = new Digits('hud-speed__num');
     hd.speedFill = h('i', { class: 'hud-speed__fill' });
@@ -1227,6 +1247,29 @@ export class UI {
     const sec = this._screen('hud', h('div', { class: 'hud-vignette', 'aria-hidden': 'true' }), stats, topRight, hd.live, hd.tip);
     sec.setAttribute('aria-label', 'Fahranzeige');
     this.hd = hd;
+  }
+
+  /** Kampagnen-Ziel im HUD: { name, frac, goalText, objectives: [{ label, value, target, done }] } oder null. */
+  _updateGoalHud(c) {
+    const hd = this.hd;
+    if (!c) {
+      if (!hd.goalBox.hidden) hd.goalBox.hidden = true;
+      hd.goalSig = '';
+      return;
+    }
+    hd.goalBox.hidden = false;
+    const pct = Math.round(clamp01(num(c.frac)) * 100);
+    const sig = `${c.name}|${pct}|${(c.objectives || []).map((o) => `${o.value}/${o.target}`).join(',')}`;
+    if (sig === hd.goalSig) return;
+    hd.goalSig = sig;
+    hd.goalName.textContent = `${cleanText(c.name, 30)} · ${pct} %`;
+    hd.goalFill.style.transform = `scaleX(${clamp01(num(c.frac)).toFixed(3)})`;
+    hd.goalList.textContent = '';
+    for (const o of c.objectives || []) {
+      hd.goalList.append(h('li', { class: o.done ? 'is-done' : '' },
+        h('span', null, o.done ? '✓' : '○'), h('span', null, cleanText(o.label, 40)),
+        h('b', null, `${fmtInt(o.value)}/${fmtInt(o.target)}`)));
+    }
   }
 
   /** Zeigt einen Tipp der ersten Runde ({ id, text, step, steps }) oder blendet ihn aus (null). */
@@ -1371,13 +1414,15 @@ export class UI {
     const board = navBtn('trophy', 'Rangliste', 'Weltweit & Woche', 'onOpenLeaderboard');
     const party = navBtn('users', 'Party', 'mit Freunden', 'onOpenParty', 'navbtn--party');
     const friends = navBtn('users', 'Freunde', 'Code & Rangliste', 'onOpenFriends', 'navbtn--friends');
+    const campaign = navBtn('road', 'Kampagne', '20 Karten · Sterne · Stufen', 'onOpenCampaign', 'navbtn--campaign');
+    m.campaignSub = campaign.subEl;
     const daily = navBtn('flag', 'Tagesrennen', 'Neue Strecke jeden Tag', 'onOpenDaily', 'navbtn--daily');
     m.dailySub = daily.subEl;
     const missions = navBtn('target', 'Missionen', 'Münzen verdienen', 'onOpenMissions');
     const settings = navBtn('sliders', 'Einstellungen', 'Sound & Grafik', 'onOpenSettings');
     m.partySub = party.subEl;
     const nav = h('nav', { class: 'menu__nav', 'aria-label': 'Hauptmenü' },
-      daily.btn, party.btn, friends.btn, garage.btn, board.btn, missions.btn, settings.btn);
+      campaign.btn, daily.btn, party.btn, friends.btn, garage.btn, board.btn, missions.btn, settings.btn);
 
     m.partyCode = h('strong', { class: 'party-badge__code' });
     m.partyCount = h('span', { class: 'party-badge__count' });
@@ -2128,6 +2173,73 @@ export class UI {
   // =========================================================================
   // Aufbau: Einstellungen
   // =========================================================================
+  // =========================================================================
+  // Aufbau: Kampagne
+  // =========================================================================
+  _buildCampaign() {
+    const c = {};
+    c.levelNum = h('strong', { class: 'camp-head__level' }, 'Stufe 1');
+    c.xpFill = h('i', { class: 'camp-xp__fill' });
+    c.xpText = h('span', { class: 'camp-head__xp' });
+    c.stars = h('span', { class: 'camp-head__stars' });
+    c.head = h('div', { class: 'camp-head' },
+      h('div', { class: 'camp-head__row' }, c.levelNum, c.stars),
+      h('div', { class: 'camp-xp' }, c.xpFill), c.xpText);
+    c.list = h('div', { class: 'camp-worlds' });
+    this._sheet('campaign', { kicker: 'Singleplayer', title: 'Kampagne', cls: 'sheet--campaign' },
+      h('div', { class: 'sheet__body' }, c.head,
+        h('p', { class: 'muted-note' }, 'Jede Karte hat eine feste Strecke mit Ziel. Erreiche das Ziel für den ersten Stern, die Zusatzaufgaben bringen Stern 2 und 3. Sterne schalten neue Karten frei, Sterne und Stufen zahlen Münzen. Wiederholen bringt XP.'),
+        c.list));
+    this.cp = c;
+  }
+
+  /**
+   * Kartenübersicht. maps: [{ id, name, number, world, worldName, goal, goals, stars, best, unlocked, hint }]
+   * campaign: { level, into, need, frac, stars, maxStars }
+   */
+  renderCampaign({ maps = [], level = null, stars = 0, maxStars = 60 } = {}) {
+    const c = this.cp;
+    if (level) {
+      c.levelNum.textContent = `Fahrerstufe ${level.level}`;
+      c.xpFill.style.transform = `scaleX(${clamp01(num(level.frac)).toFixed(3)})`;
+      c.xpText.textContent = `${fmtInt(level.into)} / ${fmtInt(level.need)} XP bis Stufe ${level.level + 1}`;
+    }
+    c.stars.textContent = `${stars} / ${maxStars} ★`;
+    c.list.textContent = '';
+    const byWorld = new Map();
+    for (const m of maps) {
+      if (!byWorld.has(m.world)) byWorld.set(m.world, []);
+      byWorld.get(m.world).push(m);
+    }
+    for (const [world, list] of byWorld) {
+      const have = list.reduce((sum, m) => sum + num(m.stars), 0);
+      const cards = list.map((m) => {
+        const starRow = h('span', { class: 'cmap__stars', 'aria-label': `${num(m.stars)} von 3 Sternen` },
+          [1, 2, 3].map((i) => h('span', { class: i <= num(m.stars) ? 'is-on' : '' }, '★')));
+        const goalLines = (m.goals || []).slice(1).map((g, i) => h('li', { class: num(m.stars) >= i + 2 ? 'is-done' : '' },
+          h('span', null, num(m.stars) >= i + 2 ? '✓' : '○'), cleanText(g.label, 40)));
+        const body = [
+          h('span', { class: 'cmap__top' }, h('b', { class: 'cmap__num' }, `${world + 1}-${num(m.number)}`), h('span', { class: 'cmap__name' }, cleanText(m.name, 26)), starRow),
+          h('span', { class: 'cmap__meta' }, `${fmtInt(m.goal)} m${TIME_TAG[m.time] ? ` · ${TIME_TAG[m.time]}` : ''}${num(m.best) ? ` · Bestwert ${fmtInt(m.best)} m` : ''}`),
+          h('ul', { class: 'cmap__goals' }, goalLines),
+        ];
+        if (m.unlocked) {
+          return h('button', { type: 'button', class: `cmap${num(m.stars) === 3 ? ' is-perfect' : ''}`, onClick: () => this._call('onStartMap', m.id) }, ...body,
+            h('span', { class: 'cmap__go' }, icon('play'), num(m.stars) ? 'Nochmal fahren' : 'Starten'));
+        }
+        const hint = m.hint || {};
+        const need = [];
+        if (hint.needPrev) need.push(`Schaffe erst ${cleanText(hint.needPrev.name, 24)}`);
+        if (num(hint.needStars) > 0) need.push(`noch ${num(hint.needStars)} ★ sammeln`);
+        return h('div', { class: 'cmap is-locked', 'aria-disabled': 'true' }, ...body,
+          h('span', { class: 'cmap__lock' }, icon('lock'), need.join(' · ') || 'Gesperrt'));
+      });
+      c.list.append(h('section', { class: 'camp-world', 'data-world': String(world) },
+        h('h3', { class: 'section-title' }, cleanText(list[0].worldName, 24), h('span', { class: 'camp-world__count' }, `${have}/${list.length * 3} ★`)),
+        h('div', { class: 'camp-grid' }, cards)));
+    }
+  }
+
   /** Reiter der Einstellungen wechseln (merkt sich die Wahl, auch nach dem Schließen). */
   _selectSettingsTab(id) {
     const st = this.st;
@@ -2343,6 +2455,16 @@ export class UI {
     g.missions = h('section', { class: 'go__missions', hidden: true, 'aria-labelledby': 'lr-go-missions' },
       h('h3', { class: 'section-title', id: 'lr-go-missions' }, icon('check'), 'Mission erfüllt'), g.missionList);
 
+    // Kampagne: Sterne, Aufgaben, Belohnung
+    g.campStars = h('div', { class: 'camp-stars', 'aria-hidden': 'true' });
+    g.campSummary = h('p', { class: 'camp-summary' });
+    g.campList = h('ul', { class: 'camp-goals' });
+    g.campReward = h('p', { class: 'camp-reward' });
+    g.campXp = h('div', { class: 'camp-xp' }, h('i', { class: 'camp-xp__fill' }));
+    g.camp = h('section', { class: 'go__camp', hidden: true, 'aria-labelledby': 'lr-go-camp' },
+      h('h3', { class: 'section-title', id: 'lr-go-camp' }, icon('flag'), 'Kampagne'),
+      g.campStars, g.campSummary, g.campList, g.campReward, g.campXp);
+
     g.raceList = h('ol', { class: 'results' });
     g.raceSummary = h('p', { class: 'results__summary' });
     g.race = h('section', { class: 'go__race', hidden: true, 'aria-labelledby': 'lr-go-race' },
@@ -2361,12 +2483,16 @@ export class UI {
     const guard = (fn) => () => { if (!g.actions.classList.contains('is-guarded')) fn(); };
     g.again = h('button', { type: 'button', class: 'btn btn--play go__again', onClick: guard(() => this._call('onRestart')) },
       icon('restart', 'btn__icon'), h('span', { class: 'btn__label' }, 'Nochmal'), chevrons());
+    g.next = h('button', { type: 'button', class: 'btn btn--gold', hidden: true, onClick: guard(() => this._call('onNextMap')) },
+      icon('play', 'btn__icon'), h('span', { class: 'btn__label' }, 'Nächste Karte'));
+    g.challenge = h('button', { type: 'button', class: 'btn btn--ghost', onClick: guard(() => this._call('onChallenge')) },
+      icon('flag'), h('span', { class: 'btn__label' }, 'Herausfordern'));
     g.actions = h('div', { class: 'go__actions' },
       g.again,
+      g.next,
       h('button', { type: 'button', class: 'btn btn--ghost', onClick: guard(() => this._call('onOpenGarage')) },
         icon('car'), h('span', { class: 'btn__label' }, 'Garage')),
-      h('button', { type: 'button', class: 'btn btn--ghost', onClick: guard(() => this._call('onChallenge')) },
-        icon('flag'), h('span', { class: 'btn__label' }, 'Herausfordern')),
+      g.challenge,
       h('button', { type: 'button', class: 'btn btn--ghost', onClick: guard(() => this._call('onToMenu')) },
         icon('menu'), h('span', { class: 'btn__label' }, 'Menü')));
 
@@ -2375,7 +2501,7 @@ export class UI {
         h('div', { class: 'go__distance', 'aria-live': 'off' }, g.dist.el, h('span', { class: 'go__unit' }, 'm')),
         g.record,
         h('div', { class: 'go__meta' }, g.best, g.rank)),
-      h('div', { class: 'go__cols' }, g.coins, h('div', { class: 'go__side' }, g.race, g.missions)),
+      h('div', { class: 'go__cols' }, g.coins, h('div', { class: 'go__side' }, g.camp, g.race, g.missions)),
       statsRow);
 
     const card = h('div', { class: 'go' },
@@ -2386,6 +2512,35 @@ export class UI {
     const sec = this._screen('gameover', card);
     sec.setAttribute('aria-labelledby', 'lr-go-title');
     this.go = g;
+  }
+
+  _renderGoCampaign(camp) {
+    const g = this.go;
+    g.camp.hidden = !camp;
+    g.next.hidden = !(camp && camp.next);
+    if (!camp) return;
+    const ev = camp.evaluation;
+    g.campStars.textContent = '';
+    for (let i = 1; i <= 3; i++) g.campStars.append(h('span', { class: `camp-star${i <= ev.stars ? ' is-on' : ''}` }, '★'));
+    const nu = camp.reward.newStars;
+    g.campSummary.textContent = ev.finished
+      ? (nu > 0 ? `${nu === 1 ? 'Neuer Stern' : `${nu} neue Sterne`}!` : 'Geschafft – keine neuen Sterne.')
+      : 'Ziel nicht erreicht. Beim nächsten Mal klappt es!';
+    g.campList.textContent = '';
+    for (const goal of ev.goals) {
+      g.campList.append(h('li', { class: goal.done ? 'is-done' : '' },
+        h('span', { class: 'camp-goals__tick' }, goal.done ? '✓' : '✗'),
+        h('span', { class: 'camp-goals__text' }, cleanText(goal.label, 60)),
+        goal.type === 'finish' ? null : h('b', null, `${fmtInt(goal.value)}/${fmtInt(goal.target)}`)));
+    }
+    const parts = [];
+    if (camp.reward.coins > 0) parts.push(`+${fmtInt(camp.reward.coins)} Münzen für neue Sterne`);
+    if (camp.reward.xp > 0) parts.push(`+${fmtInt(camp.reward.xp)} XP`);
+    for (const l of camp.reward.levelUps || []) parts.push(`Fahrerstufe ${l}!`);
+    g.campReward.textContent = parts.join(' · ');
+    g.campXp.firstChild.style.transform = `scaleX(${clamp01(num(camp.level && camp.level.frac)).toFixed(3)})`;
+    g.campXp.title = camp.level ? `Stufe ${camp.level.level}: ${fmtInt(camp.level.into)} / ${fmtInt(camp.level.need)} XP` : '';
+    if (camp.next) g.next.querySelector('.btn__label').textContent = `Nächste: ${cleanText(camp.next.name, 22)}`;
   }
 
   _renderGoMeta() {

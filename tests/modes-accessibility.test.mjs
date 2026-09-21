@@ -26,7 +26,8 @@ function rowGaps(mode, seed = 'modes', raceId = null) {
 
 describe('Schwierigkeit', () => {
   it('kennt drei Stufen; nur Entspannt zählt nicht für die Rangliste', () => {
-    assert.deepEqual(Object.keys(DIFFICULTY_MODES), ['easy', 'normal', 'hard']);
+    assert.deepEqual(Object.keys(DIFFICULTY_MODES), ['easy', 'normal', 'hard', 'campaign']);
+    assert.equal(DIFFICULTY_MODES.campaign.ranked, false);
     assert.equal(DIFFICULTY_MODES.easy.ranked, false);
     assert.equal(DIFFICULTY_MODES.normal.ranked, true);
     assert.equal(DIFFICULTY_MODES.hard.ranked, true);

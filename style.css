@@ -4078,3 +4078,70 @@ html.reduce-motion *::after {
 /* Menü-Kacheln: ungerade Zahl → die letzte füllt die ganze Zeile */
 .menu__nav .navbtn:last-child:nth-child(odd) { grid-column: 1 / -1; }
 .navbtn--friends .navbtn__icon { color: var(--gold); background: rgba(255, 201, 60, 0.12); }
+
+/* ===========================================================================
+ * Kampagne
+ * ======================================================================== */
+.navbtn--campaign .navbtn__icon { color: var(--gold); background: rgba(255, 201, 60, 0.13); }
+
+.camp-head { display: grid; gap: 6px; margin: 0 0 14px; padding: 12px 14px; border: 1px solid var(--hairline); border-radius: var(--r); background: var(--raise); }
+.camp-head__row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.camp-head__level { font: 800 1.15rem/1 var(--font-display); letter-spacing: 0.04em; }
+.camp-head__stars { color: var(--gold); font: 800 1rem/1 var(--font-cond); letter-spacing: 0.06em; }
+.camp-head__xp { color: var(--muted); font-size: 0.82rem; }
+.camp-xp { height: 8px; border-radius: 4px; background: rgba(243, 245, 249, 0.1); overflow: hidden; }
+.camp-xp__fill { display: block; height: 100%; width: 100%; transform-origin: left; background: linear-gradient(90deg, var(--signal), var(--gold)); transition: transform 0.4s ease; }
+
+.camp-world { margin: 0 0 18px; }
+.camp-world .section-title { display: flex; justify-content: space-between; align-items: baseline; }
+.camp-world__count { color: var(--gold); font: 700 0.85rem/1 var(--font-cond); letter-spacing: 0.06em; }
+.camp-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 559.98px) { .camp-grid { grid-template-columns: minmax(0, 1fr); } }
+
+.cmap {
+  position: relative; display: flex; flex-direction: column; gap: 6px; padding: 12px 13px; text-align: left;
+  border: 1px solid var(--line); border-radius: var(--r-lg); background: linear-gradient(180deg, rgba(26, 32, 43, 0.9), rgba(14, 17, 23, 0.9));
+  color: var(--text); font: inherit; cursor: pointer;
+  transition: border-color 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease;
+}
+button.cmap:hover { border-color: var(--signal); box-shadow: 0 6px 22px rgba(255, 90, 31, 0.16); }
+.cmap.is-perfect { border-color: rgba(255, 201, 60, 0.6); }
+.cmap.is-locked { cursor: not-allowed; opacity: 0.55; }
+.cmap__top { display: flex; align-items: baseline; gap: 8px; }
+.cmap__num { color: var(--signal); font: 800 0.85rem/1 var(--font-cond); letter-spacing: 0.08em; }
+.cmap__name { flex: 1 1 auto; min-width: 0; font: 800 1rem/1.1 var(--font-cond); letter-spacing: 0.04em; text-transform: uppercase; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmap__stars { display: inline-flex; gap: 1px; color: rgba(243, 245, 249, 0.2); font-size: 0.95rem; }
+.cmap__stars .is-on { color: var(--gold); }
+.cmap__meta { color: var(--muted); font-size: 0.78rem; }
+.cmap__goals { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: 0.8rem; color: var(--muted); }
+.cmap__goals li { display: flex; gap: 6px; }
+.cmap__goals li.is-done { color: var(--good); }
+.cmap__go, .cmap__lock { display: inline-flex; align-items: center; gap: 6px; margin-top: 2px; font: 800 0.78rem/1 var(--font-cond); letter-spacing: 0.08em; text-transform: uppercase; }
+.cmap__go { color: var(--signal); }
+.cmap__go .icon, .cmap__lock .icon { width: 14px; height: 14px; }
+.cmap__lock { color: var(--muted); }
+
+/* HUD: Ziel und Aufgaben */
+.hud-goal { width: min(240px, 44vw); margin-top: 8px; padding: 8px 10px; border-left: 3px solid var(--gold); border-radius: var(--r); background: rgba(8, 11, 16, 0.6); }
+.hud-goal[hidden] { display: none; }
+.hud-goal__head { display: flex; align-items: center; gap: 6px; font: 800 0.78rem/1 var(--font-cond); letter-spacing: 0.08em; text-transform: uppercase; }
+.hud-goal__head .icon { width: 13px; height: 13px; color: var(--gold); }
+.hud-goal__bar { height: 5px; margin: 6px 0; border-radius: 3px; background: rgba(243, 245, 249, 0.14); overflow: hidden; }
+.hud-goal__fill { display: block; height: 100%; width: 100%; transform-origin: left; background: var(--gold); }
+.hud-goal__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 0.74rem; }
+.hud-goal__list li { display: flex; gap: 6px; color: var(--muted); }
+.hud-goal__list li > span:nth-child(2) { flex: 1 1 auto; }
+.hud-goal__list li.is-done { color: var(--good); }
+.hud-goal__list b { font-weight: 700; }
+
+/* Rundenende: Kampagnenblock */
+.camp-stars { display: flex; gap: 6px; margin-bottom: 6px; font-size: 2rem; line-height: 1; }
+.camp-star { color: rgba(243, 245, 249, 0.16); }
+.camp-star.is-on { color: var(--gold); text-shadow: 0 0 14px rgba(255, 201, 60, 0.6); }
+.camp-summary { margin: 0 0 8px; font-weight: 700; }
+.camp-goals { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 4px; font-size: 0.9rem; }
+.camp-goals li { display: flex; gap: 8px; color: var(--muted); }
+.camp-goals li.is-done { color: var(--good); }
+.camp-goals__text { flex: 1 1 auto; min-width: 0; }
+.camp-reward { margin: 0 0 8px; color: var(--gold); font-weight: 700; font-size: 0.9rem; }
+.go__camp .camp-xp { margin-top: 4px; }

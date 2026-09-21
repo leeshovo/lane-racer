@@ -3,7 +3,7 @@
  * Einheiten: Meter, Sekunden, m/s (× 3,6 = km/h). Fahrtrichtung = -z.
  */
 
-export const VERSION = '2.4.1';
+export const VERSION = '2.5.0';
 
 // Öffentliche Supabase-Zugangsdaten (Publishable Key darf im Browser stehen –
 // geschützt wird über Row Level Security und geprüfte Server-Funktionen).
@@ -271,6 +271,7 @@ export const DIFFICULTY_MODES = {
   easy:   { label: 'Entspannt', spacing: 1.2, double: -0.1,  coins: 0.75, ranked: false },
   normal: { label: 'Normal',    spacing: 1,   double: 0,     coins: 1,    ranked: true },
   hard:   { label: 'Hardcore',  spacing: 1,   double: 0.12,  coins: 1.25, ranked: true },
+  campaign: { label: 'Kampagne', spacing: 1,   double: 0,     coins: 1,    ranked: false }, // feste Karten, zählt nicht für die Rangliste
 };
 
 export const POWERUPS = {
@@ -342,6 +343,11 @@ export const ACHIEVEMENTS = [
   { id: 'streak_7',   name: 'Wochenserie',     text: 'Fahre an 7 Tagen hintereinander',            metric: 'bestStreak',   target: 7,     reward: 200, color: 'acid' },
   { id: 'daily_1',    name: 'Tagesfahrer',     text: 'Fahre ein Tagesrennen',                      metric: 'dailyRuns',    target: 1,     reward: 50 },
   { id: 'party_1',    name: 'Teamgeist',       text: 'Fahre ein Party-Rennen mit Freunden',        metric: 'partyRaces',   target: 1,     reward: 75 },
+  { id: 'camp_1',     name: 'Auf der Karte',   text: 'Schaffe deine erste Kampagnen-Karte',        metric: 'campaignMaps', target: 1,     reward: 50 },
+  { id: 'camp_w1',    name: 'Sonnental gemeistert', text: 'Schaffe alle 4 Karten im Sonnental',    metric: 'campaignWorld1', target: 4,   reward: 150 },
+  { id: 'camp_stars_15', name: 'Sternesammler', text: 'Sammle 15 Sterne in der Kampagne',         metric: 'campaignStars', target: 15,   reward: 200 },
+  { id: 'camp_stars_40', name: 'Sternenhimmel', text: 'Sammle 40 Sterne in der Kampagne',         metric: 'campaignStars', target: 40,   reward: 500 },
+  { id: 'camp_lvl_10', name: 'Routinier',       text: 'Erreiche Fahrerstufe 10',                  metric: 'campaignLevel', target: 10,   reward: 300 },
   { id: 'hard_2k',    name: 'Nervenstark',     text: 'Fahre 2.000 m im Hardcore-Modus',            metric: 'bestHard',     target: 2000,  reward: 200 },
 ];
 

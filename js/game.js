@@ -91,6 +91,8 @@ export class Game {
     this.state = 'idle'; // 'idle' | 'countdown' | 'playing' | 'crashed' | 'over'
     this.mode = 'normal';
     this.modeDef = DIFFICULTY_MODES.normal;
+    this.map = null;      // Kampagnenkarte der laufenden Runde (oder null)
+    this.finishTime = 0;
     this.night = false;
     this.debugHitboxes = false;
 
@@ -157,11 +159,14 @@ export class Game {
 
   /**
    * Neue Runde vorbereiten und Countdown starten.
-   * @param {object} opts { seed, raceId, party, countdown (s), mode ('easy'|'normal'|'hard') }
+   * @param {object} opts { seed, raceId, party, countdown (s), mode ('easy'|'normal'|'hard'|'campaign'), map }
+   *   map (Kampagne): { id, world, d0, d1, goal } – feste Welt, Schwierigkeit von d0 bis d1 über die Strecke, Ziel nach goal m
    */
-  start({ seed = `${Date.now()}-${Math.random()}`, raceId = null, party = null, countdown = CONFIG.countdownSolo, mode = 'normal' } = {}) {
+  start({ seed = `${Date.now()}-${Math.random()}`, raceId = null, party = null, countdown = CONFIG.countdownSolo, mode = 'normal', map = null } = {}) {
     this.#clearRun();
     this.#resetRun();
+    this.map = map && !raceId ? { id: map.id, world: map.world, d0: map.d0, d1: map.d1, goal: map.goal } : null;
+    if (this.map) this.worldIndex = this.map.world;
     // Gemeinsame Strecken (Party, Tagesrennen) sind immer "normal", damit alle denselben Verkehr sehen
     this.mode = raceId ? 'normal' : (mode in DIFFICULTY_MODES ? mode : 'normal');
     this.modeDef = DIFFICULTY_MODES[this.mode];
@@ -289,6 +294,7 @@ export class Game {
       nitro: this.nitro,
       nitroActive: this.nitroActive,
       nitroReady: this.nitro >= CONFIG.nitroMinToStart,
+      goal: this.map ? { distance: this.map.goal, frac: clamp(this.distance / this.map.goal, 0, 1) } : null,
       combo: this.combo,
       comboFrac: this.combo > 0 ? clamp(this.comboTimer / CONFIG.comboWindow, 0, 1) : 0,
       shield: this.shieldActive,
@@ -333,6 +339,9 @@ export class Game {
       case 'crashed':
         this.#updateCrash(dt);
         break;
+      case 'finished':
+        this.#updateFinished(dt);
+        break;
       default:
         break;
     }
@@ -375,13 +384,18 @@ export class Game {
   #updatePlaying(dt) {
     // 1) Schwierigkeit über die Zeit
     this.elapsed += dt;
-    this.difficulty = Math.min(this.elapsed / CONFIG.difficultyTime, 1);
+    // Kampagne: Schwierigkeit hängt von der gefahrenen Strecke ab (jede Karte ist gleich schwer, egal wie schnell man ist)
+    this.difficulty = this.map
+      ? lerp(this.map.d0, this.map.d1, clamp(this.distance / this.map.goal, 0, 1))
+      : Math.min(this.elapsed / CONFIG.difficultyTime, 1);
     this.baseSpeed = lerp(CONFIG.startSpeed, CONFIG.maxBaseSpeed, this.difficulty);
 
-    const level = Math.min(CONFIG.maxLevel, 1 + Math.floor(this.elapsed / CONFIG.levelTime));
+    const level = this.map
+      ? Math.min(CONFIG.maxLevel, 1 + Math.floor((this.distance / this.map.goal) * 5))
+      : Math.min(CONFIG.maxLevel, 1 + Math.floor(this.elapsed / CONFIG.levelTime));
     if (level > this.level) {
       this.level = level;
-      const worldIndex = worldIndexForLevel(level);
+      const worldIndex = this.map ? this.map.world : worldIndexForLevel(level);
       if (worldIndex !== this.worldIndex) {
         this.worldIndex = worldIndex;
         this.events.onWorld?.(worldIndex);
@@ -408,6 +422,39 @@ export class Game {
     this.#moveTraffic(dt, relative);
     this.#updatePickups(dt, relative);
     this.#checkCollisions();
+
+    // Kampagne: Ziel erreicht → Zieleinlauf (nur, wenn nicht gerade in diesem Bild gecrasht)
+    if (this.map && this.state === 'playing' && this.distance >= this.map.goal) this.#finish();
+  }
+
+  #finish() {
+    this.state = 'finished';
+    this.finishTime = 0;
+    this.distance = Math.max(this.distance, this.map.goal);
+    this.shake = 0.4;
+    this.audio.play('levelUp');
+    this.events.onFinish?.();
+  }
+
+  /** Zieleinlauf: kurz ausrollen, keine Kollisionen mehr, dann Ergebnis. */
+  #updateFinished(dt) {
+    this.finishTime += dt;
+    const p = this.player;
+    p.gas = false;
+    p.brake = false;
+    p.speed = approach(p.speed, this.baseSpeed * 0.6, 20 * dt);
+    this.distance += p.speed * dt;
+    this.#updateSteering(dt);
+    const relative = p.speed - this.#trafficSpeed;
+    // Verkehr weiter bewegen und harmlos wegräumen (durch das Auto hindurch, ohne Kollision)
+    for (const e of this.enemies) {
+      e.object.position.z += relative * dt;
+      this.#updateEnemyBox(e);
+    }
+    if (this.finishTime >= 1.8) {
+      this.state = 'over';
+      this.events.onOver?.(this.#result());
+    }
   }
 
   #updateCrash(dt) {
@@ -1044,6 +1091,8 @@ export class Game {
     this.baseSpeed = CONFIG.startSpeed;
     this.level = 1;
     this.worldIndex = 0;
+    this.map = null;
+    this.finishTime = 0;
     this.safeLane = MIDDLE_LANE;
     this.freeLanes = [MIDDLE_LANE];
     this.lastRowZ = 0;
@@ -1128,6 +1177,8 @@ export class Game {
       seed: this.seed,
       car: this.carId,
       mode: this.mode,
+      mapId: this.map ? this.map.id : null,
+      finished: this.state === 'over' && Boolean(this.map) && this.finishTime > 0,
     };
   }
 }

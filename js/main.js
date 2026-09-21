@@ -28,6 +28,7 @@ import { createFriends } from './friends.js';
 import { createCloud } from './cloud.js';
 import { copyToClipboard } from './clipboard.js';
 import { createInput } from './input.js';
+import { CAMPAIGN_MAPS, mapById, nextMapOf, isMapUnlocked, unlockHint, starsOf, totalStars, levelInfo, applyCampaignResult, levelReward, OBJECTIVES } from './campaign.js';
 import { hashSeed } from './rng.js';
 import { UI } from './ui.js';
 import { Game } from './game.js';
@@ -63,6 +64,7 @@ const app = {
   lastRun: null,        // { seed, distance } der letzten Runde (für "Herausfordern")
   cloud: { savedAt: null, timer: 0 },
   tutorial: null,       // Tipps der ersten Runde (null = keine)
+  activeMap: null,      // Kampagnenkarte der laufenden Runde
   resumeAt: 0,          // Zeitpunkt (ms), an dem es nach der Pause weitergeht (0 = kein Rückwärtszählen läuft)
   resumeShown: 0,       // zuletzt angezeigte Zahl des Rückwärtszählens
   settingsFromPause: false, // Einstellungen wurden aus der Pause geöffnet (Zurück führt zur Pause)
@@ -150,6 +152,9 @@ const ui = new UI({
     onFriendAdd: (code) => friends.add(code),
     onPartyFriend: (code) => friends.addFromParty(code),
     onOpenFriends: () => openFriends(),
+    onOpenCampaign: () => openCampaign(),
+    onStartMap: (id) => startMap(id),
+    onNextMap: () => { const m = mapById(app.lastStart && app.lastStart.map && app.lastStart.map.id); const n = nextMapOf(m); if (n) startMap(n.id); },
     onFriendCopy: () => friends.copyLink(),
     onFriendShare: () => friends.shareLink(),
     onFriendRemove: (id) => friends.remove(id),
@@ -323,7 +328,7 @@ function frame(now) {
 
   if (inRun || game.state === 'crashed') {
     const hud = game.hud();
-    ui.updateHud({ ...hud, live: liveList(now), race: Boolean(app.race && app.race.raceId === game.raceId) });
+    ui.updateHud({ ...hud, live: liveList(now), race: Boolean(app.race && app.race.raceId === game.raceId), campaign: campaignHud(hud) });
     if (app.tutorial && game.state === 'playing' && running) updateTutorial(hud, dt);
     if (app.party && running) app.party.sendState(game.liveState());
   }
@@ -463,7 +468,7 @@ window.addEventListener('resize', () => {
 function setScreen(name) {
   app.screen = name;
   ui.showScreen(name);
-  const statusByScreen = { menu: 'menu', garage: 'garage', party: 'lobby', leaderboard: 'menu', missions: 'menu', settings: 'menu', hud: 'driving', gameover: 'crashed' };
+  const statusByScreen = { menu: 'menu', campaign: 'menu', garage: 'garage', party: 'lobby', leaderboard: 'menu', missions: 'menu', settings: 'menu', hud: 'driving', gameover: 'crashed' };
   if (app.party && statusByScreen[name]) app.party.setStatus(statusByScreen[name]);
 }
 
@@ -489,6 +494,7 @@ function renderMenu() {
     missions: profile.missions,
     party: app.party ? { code: app.partyCode, memberCount: app.party.members.length } : null,
     rejoin: !app.party && profile.lastParty ? profile.lastParty.code : '',
+    campaign: { level: levelInfo(profile.campaign.xp).level, stars: totalStars(profile.campaign), maxStars: CAMPAIGN_MAPS.length * 3 },
     daily: dailyMenuText(),
   });
 }
@@ -708,6 +714,37 @@ function vibrate(pattern) {
 // ---------------------------------------------------------------------------
 // Ranglisten
 // ---------------------------------------------------------------------------
+function renderCampaignScreen() {
+  ui.renderCampaign({
+    maps: CAMPAIGN_MAPS.map((m) => ({
+      ...m,
+      stars: starsOf(profile.campaign, m),
+      best: profile.campaign.best[m.id] || 0,
+      unlocked: isMapUnlocked(profile.campaign, m),
+      hint: unlockHint(profile.campaign, m),
+    })),
+    level: levelInfo(profile.campaign.xp),
+    stars: totalStars(profile.campaign),
+    maxStars: CAMPAIGN_MAPS.length * 3,
+  });
+}
+
+function openCampaign() {
+  renderCampaignScreen();
+  setScreen('campaign');
+}
+
+function startMap(id) {
+  const map = mapById(id);
+  if (!map) return;
+  if (!isMapUnlocked(profile.campaign, map)) {
+    audio.play('error');
+    ui.toast('Karte gesperrt', 'Sammle mehr Sterne auf den vorherigen Karten.', 'error');
+    return;
+  }
+  startRun({ seed: map.seed, map, remember: true });
+}
+
 async function openFriends() {
   setScreen('leaderboard');
   loadLeaderboard('friends');
@@ -1161,7 +1198,7 @@ function registerServiceWorker() {
 // ===========================================================================
 // Runde starten / beenden
 // ===========================================================================
-function startRun({ seed, raceId = null, countdown, challenge = null, remember = false }) {
+function startRun({ seed, raceId = null, countdown, challenge = null, remember = false, map = null }) {
   unlockAudio();
   cancelResume();
   app.settingsFromPause = false;
@@ -1174,26 +1211,29 @@ function startRun({ seed, raceId = null, countdown, challenge = null, remember =
     game.setPlayerCar(profile.selectedCar, colorOf(profile, profile.selectedCar));
   }
   const runSeed = seed ?? `${Date.now()}-${Math.random()}`;
-  const firstTime = timeFor(runSeed, 0);
-  world.setWorld(0, false, firstTime);
+  const startWorld = map ? map.world : 0;
+  const firstTime = map ? map.time : timeFor(runSeed, 0);
+  world.setWorld(startWorld, false, firstTime);
   structures.reset(runSeed);
-  audio.setMusic(WORLDS[0].id);
+  audio.setMusic(WORLDS[startWorld].id);
   audio.setMusicIntensity(0.5);
   app.runSeed = runSeed;
   app.activeChallenge = challenge;
-  app.lastStart = remember ? { seed: runSeed, raceId, challenge } : null;
+  app.lastStart = remember ? { seed: runSeed, raceId, challenge, map } : null;
+  app.activeMap = map;
   liveCache = null;
-  registerRunOnServer();
+  if (!map) registerRunOnServer(); // Kampagnenrunden zählen nicht für die Rangliste
   game.start({
     seed: runSeed,
     raceId,
     party: app.partyCode,
     countdown: countdown ?? CONFIG.countdownSolo,
-    mode: profile.settings.difficulty,
+    mode: map ? 'campaign' : profile.settings.difficulty,
+    map,
   });
 
   // Tipps nur in der ersten normalen Runde – nicht in Party, Tagesrennen oder Herausforderung
-  app.tutorial = !profile.tutorialDone && !raceId && !challenge ? new Tutorial({ touch: isTouch }) : null;
+  app.tutorial = !profile.tutorialDone && !raceId && !challenge && !map ? new Tutorial({ touch: isTouch }) : null;
   ui.setTip(null);
 
   setCameraMode('follow');
@@ -1262,6 +1302,11 @@ const gameEvents = {
   onBoss({ coins }) {
     ui.popup(`KONVOI ÜBERHOLT  +${coins}`, 'combo');
   },
+  onFinish() {
+    vibrate([60, 40, 60, 40, 120]);
+    ui.flash('#ffc93c');
+    ui.setTouchControls(false);
+  },
   onCrash() {
     vibrate([120, 40, 200]);
     ui.flash('#ff3b4e');
@@ -1299,7 +1344,33 @@ async function finishRun(result) {
   }
 
   // Entspannte Runden sind zum Üben da und zählen nicht für die Rangliste
-  const canSubmit = summary.ranked && Boolean(profile.online) && online.status === 'online' && result.duration >= 1;
+  // Kampagne: Sterne, Belohnungen, Stufen
+  const map = result.mapId ? mapById(result.mapId) : null;
+  let campaign = null;
+  if (map) {
+    const res = applyCampaignResult(profile, map, result);
+    const extra = res.coins + res.levelCoins;
+    summary.breakdown.campaign = extra;
+    summary.total += extra;
+    const more = checkAchievements(profile); // Kampagnen-Erfolge
+    summary.achievements.push(...more.unlocked);
+    summary.breakdown.achievements += more.coins;
+    summary.total += more.coins;
+    const next = nextMapOf(map);
+    campaign = {
+      map: { id: map.id, name: map.name, worldName: map.worldName, number: map.number },
+      evaluation: res.evaluation,
+      reward: { coins: res.coins, xp: res.xp, levelUps: res.levelUps, newStars: res.newStars },
+      level: levelInfo(profile.campaign.xp),
+      next: next && isMapUnlocked(profile.campaign, next) ? { id: next.id, name: next.name } : null,
+    };
+    saveProfile(profile);
+    cloud.scheduleSave();
+    if (res.unlockedNext) ui.toast('Neue Karte frei!', `${res.unlockedNext.worldName}: ${res.unlockedNext.name}`, 'mission');
+    for (const l of res.levelUps) ui.toast(`Fahrerstufe ${l}`, `+${levelReward(l)} Münzen`, 'mission');
+  }
+
+  const canSubmit = !map && summary.ranked && Boolean(profile.online) && online.status === 'online' && result.duration >= 1;
   setScreen('gameover');
   ui.showGameOver({
     distance,
@@ -1316,7 +1387,8 @@ async function finishRun(result) {
       time: result.duration,
     },
     race: result.isPartyRace ? raceView() : null,
-    online: !summary.ranked ? 'practice' : canSubmit ? 'pending' : 'offline',
+    online: map ? 'campaign' : !summary.ranked ? 'practice' : canSubmit ? 'pending' : 'offline',
+    campaign,
   });
   renderTopBar();
   audio.setMusicIntensity(0.25);
@@ -1361,6 +1433,20 @@ async function finishRun(result) {
   } else {
     ui.updateGameOver({ online: 'error' });
   }
+}
+
+/** Ziel und Zusatzaufgaben der Kampagnenkarte fürs HUD (null außerhalb der Kampagne). */
+function campaignHud(hud) {
+  const map = game.map && mapById(game.map.id);
+  if (!map || !hud.goal) return null;
+  return {
+    name: `${map.worldName} ${map.number}`,
+    frac: hud.goal.frac,
+    objectives: map.goals.slice(1).map((g) => {
+      const value = Math.min(OBJECTIVES[g.type].value(game), g.target);
+      return { label: OBJECTIVES[g.type].label(g.target), value, target: g.target, done: value >= g.target };
+    }),
+  };
 }
 
 /** Tipps der ersten Runde: füttert tutorial.js mit dem Spielstand und zeigt den passenden Tipp. */

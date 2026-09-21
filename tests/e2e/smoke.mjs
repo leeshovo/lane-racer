@@ -163,6 +163,27 @@ try {
     if (name === 'leaderboard') check(await page.evaluate(() => [...document.querySelectorAll('.tab')].map((t) => t.textContent.trim()).includes('Freunde')), 'Tab "Freunde" vorhanden');
   }
 
+  console.log('Kampagne');
+  if ((await screen()) !== 'menu') await page.evaluate(() => window.laneRacer.ui.cb.onToMenu());
+  await page.waitForFunction(() => window.laneRacer.app.screen === 'menu');
+  check(await clickText('^\\s*kampagne'), 'Kampagne öffnen');
+  await page.waitForFunction(() => window.laneRacer.app.screen === 'campaign', null, { timeout: 5000 }).catch(() => {});
+  const cmaps = await page.evaluate(() => ({ all: document.querySelectorAll('.cmap').length, open: document.querySelectorAll('button.cmap').length }));
+  check(cmaps.all === 20 && cmaps.open === 1, `20 Karten, nur die erste offen (${cmaps.all}/${cmaps.open})`);
+  await page.evaluate(() => document.querySelector('button.cmap').click());
+  await page.waitForFunction(() => window.laneRacer.game.state === 'playing', null, { timeout: 90000 });
+  check(await page.evaluate(() => !document.querySelector('.hud-goal').hidden), 'Ziel-Anzeige im HUD');
+  // Ziel fast erreicht: Verkehr wegschieben und das letzte Stück fahren lassen
+  await page.evaluate(() => { window.laneRacer.game.distance = 1190; });
+  await page.waitForFunction(() => {
+    for (const e of window.laneRacer.game.enemies) e.object.position.z = -500;
+    return window.laneRacer.game.state === 'over' || window.laneRacer.app.screen === 'gameover';
+  }, null, { timeout: 90000, polling: 50 });
+  await page.waitForFunction(() => window.laneRacer.app.screen === 'gameover', null, { timeout: 30000 }).catch(() => {});
+  check(await page.evaluate(() => (window.laneRacer.profile.campaign.stars.w1m1 || 0) >= 1), 'Karte 1-1 geschafft: mindestens 1 Stern gespeichert');
+  check(await page.evaluate(() => !document.querySelector('.go__camp').hidden && document.querySelectorAll('.camp-star.is-on').length >= 1), 'Ergebnis zeigt Sterne');
+  check(await page.evaluate(() => !document.querySelector('.go__actions .btn--gold').hidden), '"Nächste Karte" erscheint (Karte 2 ist frei)');
+
   check(problems.length === 0, problems.length ? `keine Fehler in der Konsole:\n      ${problems.join('\n      ')}` : 'keine Fehler in der Konsole');
 } finally {
   await browser.close();

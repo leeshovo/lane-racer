@@ -25,6 +25,19 @@ Kein Build-Schritt: Die Module werden per Import-Map direkt vom CDN geladen.
 Auf dem Handy: links/rechts auf den Bildschirm tippen oder die Pfeile nutzen, dazu Knöpfe für Gas,
 Bremse, Nitro und Fähigkeit.
 
+## Singleplayer: Kampagne
+
+Im Hauptmenü unter **Kampagne**: 20 feste Karten (4 pro Welt, Sonnental bis Vulkan). Jede Karte hat eine immer
+gleiche Strecke mit einem **Ziel**. Das Ziel zu erreichen gibt Stern 1, zwei Zusatzaufgaben (Münzen, Beinahe-Unfälle,
+Rammen, Nitro, Überholen) bringen Stern 2 und 3. Ziel und Aufgaben stehen während der Fahrt im HUD.
+
+- **Freischalten:** Die nächste Karte braucht die vorherige (mindestens 1 Stern) und genug Sterne insgesamt. Mit
+  lauter Ein-Sterne-Ergebnissen kommt man nicht bis zum Ende – Sterne grinden lohnt sich.
+- **Belohnungen:** Münzen für jeden *neuen* Stern (später mehr in späteren Welten), XP für jede Fahrt und **Fahrerstufen**
+  mit Münz-Bonus. Wiederholen bringt XP, aber keine doppelten Sternprämien.
+- Alles ist offline spielbar, wird im Spielstand gespeichert (auch in der Cloud-Sicherung) und zählt nicht für die
+  Online-Rangliste. Die Logik steht in `js/campaign.js`.
+
 ## Spielprinzip
 
 - **Score = gefahrene Distanz.** Alle 12 Sekunden ein Level, alle 3 Level eine neue Welt:
@@ -172,6 +185,7 @@ js/
   config.js     Alle Stellschrauben: Tempo, Schwierigkeit, Autos, Welten, Missionen
   bend.js       Kurven und Hügel (gebogene Welt im Vertex-Shader)
   tutorial.js   Tipps der ersten Runde (reine Logik)
+  campaign.js   Kampagne: Karten, Sterne, Freischaltung, XP und Stufen (reine Logik)
   friends.js    Freunde: Code, Hinzufügen, Freunde-Rangliste (auch aus der Party heraus)
   cloud.js      Cloud-Spielstand und Sicherungscode
   input.js      Tastatur und Touch-Knöpfe

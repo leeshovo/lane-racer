@@ -6,6 +6,7 @@
  * Zusätzlich gibt es einen "Snapshot" des Spielstands, der in der Cloud
  * gesichert und auf einem anderen Gerät wiederhergestellt werden kann.
  */
+import { sanitizeCampaign, defaultCampaign, totalStars, levelInfo, CAMPAIGN_MAPS } from './campaign.js';
 import {
   CARS, MISSION_POOL, CONFIG, DIFFICULTY_MODES, ACHIEVEMENTS, SPECIAL_COLORS, carById, DEFAULT_SETTINGS, sanitizeSettings, streakBonus,
 } from './config.js';
@@ -29,6 +30,7 @@ export function defaultProfile() {
     },
     streak: { last: '', count: 0 }, // letzter Fahrtag (YYYYMMDD, UTC) und Tage in Folge
     achievements: {},               // { id: true } für geschaffte Erfolge
+    campaign: defaultCampaign(),    // Sterne, Bestwerte und XP der Kampagne (siehe campaign.js)
     missions: [],
     missionTier: {},
     daily: { key: '', best: 0 }, // bester Versuch im Tagesrennen des Tages "key" (YYYYMMDD)
@@ -55,6 +57,7 @@ function normalize(stored) {
     ? { code: lp.code, at: lp.at }
     : null;
   p.colors = { ...base.colors, ...(stored.colors || {}) };
+  p.campaign = sanitizeCampaign(stored.campaign);
   p.achievements = {};
   const known = new Set(ACHIEVEMENTS.map((a) => a.id));
   const storedAch = stored.achievements && typeof stored.achievements === 'object' ? stored.achievements : {};
@@ -116,6 +119,7 @@ export function snapshotOf(profile) {
     missionTier: { ...profile.missionTier },
     streak: { ...profile.streak },
     achievements: { ...profile.achievements },
+    campaign: sanitizeCampaign(profile.campaign),
   };
 }
 
@@ -177,6 +181,10 @@ export function metricValue(profile, metric) {
     case 'dailyRuns': return s.dailyRuns;
     case 'partyRaces': return s.partyRaces;
     case 'bestHard': return s.bestHard;
+    case 'campaignStars': return totalStars(profile.campaign);
+    case 'campaignMaps': return Object.keys(profile.campaign.stars).length;
+    case 'campaignWorld1': return CAMPAIGN_MAPS.filter((m) => m.world === 0 && profile.campaign.stars[m.id]).length;
+    case 'campaignLevel': return levelInfo(profile.campaign.xp).level;
     default: return 0;
   }
 }
