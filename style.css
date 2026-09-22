@@ -491,6 +491,21 @@ kbd {
 .btn--primary:hover::before { background: linear-gradient(180deg, #FF9257, #FF6A2B 55%, #E4490F); }
 .btn--play { padding: 17px 34px; font-size: 1.22rem; letter-spacing: 0.1em; }
 
+/* Großer Menü-Knopf: Untertitel (Karte/Countdown) direkt darunter, "frei fahren" bewusst klein und unauffällig */
+.menu__play-sub {
+  margin: -8px 0 0;
+  padding: 0 4px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+.menu__freeplay {
+  align-self: center;
+  color: var(--muted);
+  opacity: 0.8;
+}
+.menu__freeplay:hover { color: var(--text); opacity: 1; }
+
 .btn--teal { color: #04201D; }
 .btn--teal::before {
   border-color: #55DACE;

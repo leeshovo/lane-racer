@@ -116,7 +116,9 @@ try {
   await page.waitForFunction(() => window.laneRacer.app.screen === 'menu');
 
   console.log('Fahrt');
-  check(await clickText('^\\s*fahren'), '"Fahren" drücken');
+  check(await page.evaluate(() => /ranked fahren/i.test(document.querySelector('.btn--play')?.textContent || '')), 'Großer Knopf wirbt für Ranked ("Ranked fahren")');
+  // Ranked braucht eine Verbindung; dieser Test läuft komplett offline, also über den kleinen "Nur so fahren"-Knopf
+  check(await clickText('^\\s*nur so fahren'), '"Nur so fahren" drücken (Ranked braucht online)');
   await page.waitForFunction(() => window.laneRacer.game.state === 'playing', null, { timeout: 90000 });
   check(true, 'Countdown vorbei, Runde läuft');
   await page.waitForFunction(() => window.laneRacer.game.distance > 60, null, { timeout: 90000 });

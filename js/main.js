@@ -127,6 +127,7 @@ const ui = new UI({
   root: document.getElementById('ui'),
   callbacks: {
     onPlay: () => playPressed(),
+    onFreePlay: () => startRun({}),
     onOpenDaily: () => startDaily(),
     onOpenRanked: () => startRanked(),
     onBuyTuning: (carId, trackId) => purchaseTuning(carId, trackId),
@@ -513,6 +514,7 @@ function renderMenu() {
     campaign: { level: levelInfo(profile.campaign.xp).level, stars: totalStars(profile.campaign), maxStars: CAMPAIGN_MAPS.length * 3 },
     daily: dailyMenuText(),
     ranked: rankedMenuText(),
+    challenge: app.challenge,
   });
 }
 
@@ -1225,12 +1227,12 @@ function liveList(now) {
 // Start-Varianten: Fahren, Tagesrennen, Herausforderung
 // ===========================================================================
 
-/** "Fahren": normale Runde – oder die Herausforderung eines Freunden, falls ein Link offen ist. */
+/** Großer Knopf: Herausforderung eines Freunden, falls ein Link offen ist – sonst Ranked (zählt für die Wochenwertung). */
 function playPressed() {
   if (app.challenge) {
     startRun({ seed: app.challenge.seed, challenge: app.challenge, remember: true });
   } else {
-    startRun({});
+    startRanked();
   }
 }
 
@@ -1336,7 +1338,7 @@ function readChallengeFromUrl() {
 function announceChallenge() {
   const ch = app.challenge;
   if (!ch) return;
-  setTimeout(() => ui.toast(`${ch.name} fordert dich heraus`, `${ch.score.toLocaleString('de-DE')} m auf derselben Strecke – drück „Fahren“!`, 'party'), 1200);
+  setTimeout(() => ui.toast(`${ch.name} fordert dich heraus`, `${ch.score.toLocaleString('de-DE')} m auf derselben Strecke – drück „Herausforderung annehmen“!`, 'party'), 1200);
 }
 
 /** Link zur letzten Runde: gleiche Strecke (Seed) plus der Score als Ziel. */

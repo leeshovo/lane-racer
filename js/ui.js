@@ -241,8 +241,16 @@ export class UI {
   }
 
   /** Hauptmenü: Rekord, gewähltes Auto, 3 Missionen, Party-Hinweis. */
-  renderMenu({ best = 0, car = null, missions = [], party = null, daily = null, rejoin = '', campaign = null, ranked = null } = {}) {
+  renderMenu({ best = 0, car = null, missions = [], party = null, daily = null, rejoin = '', campaign = null, ranked = null, challenge = null } = {}) {
     const m = this.mn;
+    // Großer Knopf: normalerweise Ranked (das zählt für die Wochenwertung), bei offenem Herausforderungs-Link stattdessen die annehmen
+    if (challenge && typeof challenge === 'object') {
+      m.playLabel.textContent = 'Herausforderung annehmen';
+      m.playSub.textContent = `${cleanText(challenge.name, 20)} fordert dich heraus: ${fmtInt(challenge.score)} m schlagen`;
+    } else {
+      m.playLabel.textContent = 'Ranked fahren';
+      m.playSub.textContent = typeof ranked === 'string' ? ranked : 'Neue Karte alle 12 Stunden – zählt für die Wochenwertung';
+    }
     if (campaign && m.campaignSub) m.campaignSub.textContent = `Stufe ${campaign.level} · ${campaign.stars}/${campaign.maxStars} ★`;
     m.best.set(best);
     const c = car && typeof car === 'object' ? car : null;
@@ -265,7 +273,6 @@ export class UI {
     }
     m.partySub.textContent = code ? `Party ${code}` : (rejoin ? `Zurück zu ${rejoin}` : 'mit Freunden');
     if (typeof daily === 'string') m.dailySub.textContent = cleanText(daily, 40);
-    if (typeof ranked === 'string') m.rankedSub.textContent = cleanText(ranked, 40);
     m.bestTicker.textContent = best > 0 ? `Dein Rekord: ${fmtDist(best)} – schaffst du mehr?` : 'Noch kein Rekord – zeig, was du kannst';
   }
 
@@ -1534,8 +1541,14 @@ export class UI {
         h('span', { class: 'meta__value' }, m.best.el, h('span', { class: 'meta__unit' }, 'm'))),
       h('div', { class: 'meta' }, h('span', { class: 'meta__label' }, icon('car'), 'Dein Auto'), m.carName, m.carPerk));
 
+    // Großer Knopf startet Ranked (zählt für die Wochenwertung) statt einer wertungslosen Solo-Runde;
+    // Text wird dynamisch gesetzt (renderMenu), falls gerade eine Herausforderung offen ist.
+    m.playLabel = h('span', { class: 'btn__label' }, 'Ranked fahren');
     const play = h('button', { type: 'button', class: 'btn btn--play', onClick: () => this._call('onPlay') },
-      icon('play', 'btn__icon'), h('span', { class: 'btn__label' }, 'Fahren'), chevrons());
+      icon('bolt', 'btn__icon'), m.playLabel, chevrons());
+    m.playSub = h('p', { class: 'menu__play-sub' }, 'Neue Karte alle 12 Stunden – zählt für die Wochenwertung');
+    const freeplay = h('button', { type: 'button', class: 'linkbtn menu__freeplay', onClick: () => this._call('onFreePlay') },
+      icon('play'), 'Nur so fahren (ohne Wertung)');
 
     const navBtn = (iconName, label, sub, cbName, cls = '') => {
       const subEl = h('span', { class: 'navbtn__sub' }, sub);
@@ -1552,13 +1565,12 @@ export class UI {
     m.campaignSub = campaign.subEl;
     const daily = navBtn('flag', 'Tagesrennen', 'Neue Strecke jeden Tag', 'onOpenDaily', 'navbtn--daily');
     m.dailySub = daily.subEl;
-    const ranked = navBtn('bolt', 'Ranked', 'Neue Karte alle 12 Stunden', 'onOpenRanked', 'navbtn--ranked');
-    m.rankedSub = ranked.subEl;
     const missions = navBtn('target', 'Missionen', 'Münzen verdienen', 'onOpenMissions');
     const settings = navBtn('sliders', 'Einstellungen', 'Sound & Grafik', 'onOpenSettings');
     m.partySub = party.subEl;
+    // Ranked steht jetzt als großer Knopf oben; der Rangliste-Tab "Ranked" bleibt für Zeit/Platz erreichbar
     const nav = h('nav', { class: 'menu__nav', 'aria-label': 'Hauptmenü' },
-      campaign.btn, ranked.btn, daily.btn, party.btn, friends.btn, garage.btn, board.btn, missions.btn, settings.btn);
+      campaign.btn, daily.btn, party.btn, friends.btn, garage.btn, board.btn, missions.btn, settings.btn);
 
     m.partyCode = h('strong', { class: 'party-badge__code' });
     m.partyCount = h('span', { class: 'party-badge__count' });
@@ -1581,7 +1593,7 @@ export class UI {
 
     const panel = h('div', { class: 'menu__panel' },
       h('div', { class: 'menu__brand' }, logo, h('p', { class: 'menu__tagline' }, 'Drei Spuren. Kein Tempolimit.')),
-      h('div', { class: 'menu__controls' }, meta, play, m.partyBadge, nav, missionBox, keys));
+      h('div', { class: 'menu__controls' }, meta, play, m.playSub, freeplay, m.partyBadge, nav, missionBox, keys));
 
     // Bauchbinde zum Auto (Desktop, rechts unten)
     m.ltName = h('strong', { class: 'lt__name' }, '—');
