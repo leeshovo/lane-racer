@@ -249,7 +249,7 @@ export class UI {
       m.playSub.textContent = `${cleanText(challenge.name, 20)} fordert dich heraus: ${fmtInt(challenge.score)} m schlagen`;
     } else {
       m.playLabel.textContent = 'Ranked fahren';
-      m.playSub.textContent = typeof ranked === 'string' ? ranked : 'Neue Karte alle 12 Stunden – zählt für die Wochenwertung';
+      m.playSub.textContent = typeof ranked === 'string' ? ranked : 'Jede Stunde eine neue Karte – zählt für die Wochenwertung';
     }
     if (campaign && m.campaignSub) m.campaignSub.textContent = `Stufe ${campaign.level} · ${campaign.stars}/${campaign.maxStars} ★`;
     m.best.set(best);
@@ -1561,7 +1561,7 @@ export class UI {
     const board = navBtn('trophy', 'Rangliste', 'Wochenpreise · live', 'onOpenLeaderboard');
     const party = navBtn('users', 'Party', 'mit Freunden', 'onOpenParty', 'navbtn--party');
     const friends = navBtn('users', 'Freunde', 'Code & Rangliste', 'onOpenFriends', 'navbtn--friends');
-    const campaign = navBtn('road', 'Kampagne', '20 Karten · Sterne · Stufen', 'onOpenCampaign', 'navbtn--campaign');
+    const campaign = navBtn('road', 'Kampagne', '30 Karten · Sterne · Stufen', 'onOpenCampaign', 'navbtn--campaign');
     m.campaignSub = campaign.subEl;
     const daily = navBtn('flag', 'Tagesrennen', 'Neue Strecke jeden Tag', 'onOpenDaily', 'navbtn--daily');
     m.dailySub = daily.subEl;

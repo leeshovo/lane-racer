@@ -27,7 +27,7 @@ Bremse, Nitro und Fähigkeit.
 
 ## Singleplayer: Kampagne
 
-Im Hauptmenü unter **Kampagne**: 20 feste Karten (4 pro Welt, Sonnental bis Vulkan). Jede Karte hat eine immer
+Im Hauptmenü unter **Kampagne**: 30 feste Karten (6 pro Welt, Sonnental bis Vulkan; Karte 21–30 sind die schweren Zusatzkarten). Jede Karte hat eine immer
 gleiche Strecke mit einem **Ziel**. Das Ziel zu erreichen gibt Stern 1, zwei Zusatzaufgaben (Münzen, Beinahe-Unfälle,
 Rammen, Nitro, Überholen) bringen Stern 2 und 3. Ziel und Aufgaben stehen während der Fahrt im HUD.
 
@@ -69,9 +69,9 @@ Rammen, Nitro, Überholen) bringen Stern 2 und 3. Ziel und Aufgaben stehen währ
 - **Tuning:** Jedes Auto in der Garage lässt sich in drei Werten je 5 Stufen ausbauen (Nitro-Tank +8 % Nitro-Dauer,
   Fahrwerk +4 % Handling, Münzsammler +5 % Münzen je Stufe; 500 bis 5.200 Münzen pro Stufe). Das Tempo lässt sich
   bewusst nicht tunen, damit die Grenzen der Serverprüfung gültig bleiben. Dazu vier neue Erfolge.
-- **Ranked-Karten:** Alle 12 Stunden (Berlin 00:00 und 12:00) gibt es eine neue Strecke in einer festen Welt – für alle
+- **Ranked-Karten:** Jede volle Stunde (Berlin-Zeit) gibt es eine neue Strecke in einer festen Welt – für alle
   dieselbe. Es zählt der beste Lauf pro Karte; die Wochenwertung ist die **Summe deiner besten Läufe je Karte**
-  (bis zu 14 Karten pro Woche). Jede Karte hat eine eigene Live-Rangliste.
+  (bis zu 168 Karten pro Woche – wer öfter fährt, sammelt mehr). Jede Karte hat eine eigene Live-Rangliste.
 - **Missionen:** drei laufende Aufgaben, danach kommt jeweils eine schwerere Stufe.
 - **Fair by design:** In jeder Gegner-Reihe bleibt mindestens eine Spur frei, und von jeder freien Spur
   reicht ein Spurwechsel für die nächste Reihe. Um den Konvoi herum gibt es extra Platz.
@@ -88,7 +88,7 @@ Im Hauptmenü unter **Einstellungen** (im Spiel auch über die Pause). Sie sind 
 - **Ton:** Musik und Effekte einzeln an/aus, Gesamtlautstärke, Musik, Effekte und Motorgeräusch als Regler und
   **Im Hintergrund stumm** (Standard: an). Sobald du den Tab oder das Fenster wechselst, wird der komplette Ton
   angehalten – auch die Menümusik. Kommst du zurück, geht er nahtlos weiter.
-- **Grafik und Effekte:** Qualität (Auto/Hoch/Mittel/Niedrig), Kurven und Hügel, Leuchteffekte, Tempo-Effekte, Kamerawackeln.
+- **Grafik und Effekte:** *Grafik* (Auto/Hoch/Mittel/Niedrig: Schatten, Leuchteffekte, Partikel, Dekoration – Niedrig bringt mehr Bilder pro Sekunde) und davon unabhängig die *Bildqualität* (Auflösung und Kantenglättung), Kurven und Hügel, Leuchteffekte, Tempo-Effekte, Kamerawackeln.
 - **Spiel:** Schwierigkeit (Entspannt, Normal, Hardcore), **Hinweise im Spiel** (Keine, Wenige, Alle – Standard: Wenige;
   Erfolge, Missionen und Serie kommen gesammelt am Rundenende), automatische Pause, Vibration und die Einsteiger-Tipps.
 - **Anzeige:** Einheit km/h oder mph, FPS-Anzeige, Tastenhinweise.
@@ -260,7 +260,7 @@ Supabase-Projekt `lane-racer` (Region Frankfurt, kostenloser Plan):
 - **Fahrtverlauf (Anti-Cheat):** Das Spiel misst alle 1,5 s Spielzeit die gefahrene Strecke und schickt den Verlauf mit.
   `submit_score` prüft ihn gegen die Physik: nie schneller als das Grundtempo × 2,9, nie rückwärts, nicht dauerhaft langsamer
   als 60 % des Grundtempos, die Anzahl der Messpunkte passt zur Fahrzeit und der Endstand zum letzten Punkt. Ein erfundener Score
-  braucht damit einen stimmigen Verlauf statt nur einer plausiblen Endzahl. Ranked-Karten werden nur in ihrem 12-Stunden-Fenster angenommen.
+  braucht damit einen stimmigen Verlauf statt nur einer plausiblen Endzahl. Ranked-Karten werden nur in ihrer Stunde (oder der davor) angenommen.
   Tests: `tests/game.test.mjs` (ehrliche Fahrten mit allen 14 Autos bestehen die Prüfung) und `tests/ranked.test.mjs`.
 
 **Grenzen des Cheat-Schutzes:** (Auch die neuen Prüfungen schützen nur vor plumpen Fälschungen.) Wer wirklich Zeit im Spiel verbringt, kann den Client manipulieren und einen

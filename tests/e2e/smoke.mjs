@@ -64,7 +64,7 @@ try {
   // Erste Runde: Einsteiger-Tipps aktiv; Ton aus (kein Krach beim Testen)
   await context.addInitScript((epoch) => {
     if (!localStorage.getItem('laneRacer2.profile')) {
-      localStorage.setItem('laneRacer2.profile', JSON.stringify({ epoch, name: 'Tester', tutorialDone: false, settings: { music: false, sfx: false, quality: 'low' } }));
+      localStorage.setItem('laneRacer2.profile', JSON.stringify({ epoch, name: 'Tester', tutorialDone: false, settings: { music: false, sfx: false, quality: 'low', imageQuality: 'low' } }));
     }
   }, RESET_EPOCH);
   await context.route(/supabase\.co/, (route) => route.abort());
@@ -79,7 +79,7 @@ try {
   });
 
   console.log('Start');
-  await page.goto(base, { waitUntil: 'load' });
+  await page.goto(base, { waitUntil: 'load', timeout: 120000 }); // das CDN kann langsam sein
   await page.waitForFunction(() => window.laneRacer && window.laneRacer.game, null, { timeout: 60000 });
   check(true, 'Spiel lädt und startet');
   const version = await page.evaluate(() => window.laneRacer.VERSION);
@@ -196,7 +196,7 @@ try {
   check(await clickText('^\\s*kampagne'), 'Kampagne öffnen');
   await page.waitForFunction(() => window.laneRacer.app.screen === 'campaign', null, { timeout: 5000 }).catch(() => {});
   const cmaps = await page.evaluate(() => ({ all: document.querySelectorAll('.cmap').length, open: document.querySelectorAll('button.cmap').length }));
-  check(cmaps.all === 20 && cmaps.open === 1, `20 Karten, nur die erste offen (${cmaps.all}/${cmaps.open})`);
+  check(cmaps.all === 30 && cmaps.open === 1, `30 Karten, nur die erste offen (${cmaps.all}/${cmaps.open})`);
   await page.evaluate(() => document.querySelector('button.cmap').click());
   await page.waitForFunction(() => window.laneRacer.game.state === 'playing', null, { timeout: 90000 });
   check(await page.evaluate(() => !document.querySelector('.hud-goal').hidden), 'Ziel-Anzeige im HUD');

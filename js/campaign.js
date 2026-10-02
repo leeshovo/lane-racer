@@ -1,5 +1,5 @@
 /*
- * campaign.js – Kampagne (Singleplayer): 20 feste Karten in den fünf Welten zum Freispielen und Grinden.
+ * campaign.js – Kampagne (Singleplayer): 30 feste Karten in den fünf Welten zum Freispielen und Grinden.
  *
  * Jede Karte hat
  *   - eine feste Strecke (immer derselbe Verkehr → man lernt sie kennen),
@@ -13,7 +13,8 @@
 import { WORLDS, WORLD_TIMES } from './config.js';
 import { hashSeed } from './rng.js';
 
-const MAPS_PER_WORLD = 4;
+const MAPS_PER_WORLD = 6;
+const BASE_MAPS = 4; // Karte 1–4 jeder Welt = Hauptkampagne (1–20); Karte 5–6 jeder Welt folgen danach (21–30)
 
 const MAP_NAMES = [
   ['Sonntagsfahrt', 'Windmühlenweg', 'Stoßzeit', 'Sonnenfinale'],
@@ -21,6 +22,14 @@ const MAP_NAMES = [
   ['Regenschauer', 'Leuchtreklame', 'Nachtschicht', 'Neon-Finale'],
   ['Schneeflocke', 'Eispass', 'Schneesturm', 'Gipfelrennen'],
   ['Aschepfad', 'Lavafluss', 'Glutmeer', 'Feuertaufe'],
+];
+// Die zehn Zusatzkarten (Karte 5 und 6 jeder Welt)
+const BONUS_NAMES = [
+  ['Sommerwiese', 'Goldene Stunde'],
+  ['Schluchtenflug', 'Sandsturm'],
+  ['Skyline-Sprint', 'Mitternachtsrausch'],
+  ['Raureif', 'Lawinenhang'],
+  ['Funkenflug', 'Magmakammer'],
 ];
 
 /** Aufgaben-Arten: Beschriftung und wie man den Wert aus dem Rundenergebnis liest. */
@@ -49,37 +58,39 @@ function target(type, goal, star) {
 
 function buildMaps() {
   const maps = [];
-  WORLDS.forEach((world, w) => {
-    for (let m = 0; m < MAPS_PER_WORLD; m++) {
-      const index = w * MAPS_PER_WORLD + m;
-      const t = index / (WORLDS.length * MAPS_PER_WORLD - 1);
-      const goal = 1200 + 350 * index;
-      const d0 = 0.02 + 0.55 * t;
-      const d1 = Math.min(1, d0 + 0.22 + 0.06 * m);
-      const [type2, type3] = PATTERN[m];
-      const times = WORLD_TIMES[world.id] || ['default'];
-      const id = `w${w + 1}m${m + 1}`;
-      maps.push({
-        id,
-        index,
-        world: w,
-        worldName: world.name,
-        number: m + 1,
-        name: MAP_NAMES[w][m],
-        seed: `campaign-${id}`,
-        time: times[hashSeed(`campaign-time-${id}`) % times.length],
-        goal,
-        d0: +d0.toFixed(3),
-        d1: +d1.toFixed(3),
-        goals: [
-          { star: 1, type: 'finish', target: goal, label: `Erreiche das Ziel (${goal.toLocaleString('de-DE')} m)` },
-          { star: 2, type: type2, target: target(type2, goal, 2), label: OBJECTIVES[type2].label(target(type2, goal, 2)) },
-          { star: 3, type: type3, target: target(type3, goal, 3), label: OBJECTIVES[type3].label(target(type3, goal, 3)) },
-        ],
-        // Belohnung beim ersten Mal je Stern (später kommt nichts mehr für denselben Stern)
-        rewards: [40, 60, 90].map((c) => Math.round(c * (1 + w * 0.5))),
-      });
-    }
+  // Reihenfolge: erst Karte 1–4 jeder Welt, dann Karte 5–6 jeder Welt (so bleibt der Fortschritt bestehender Spieler gültig)
+  const order = [];
+  for (const [from, to] of [[0, BASE_MAPS], [BASE_MAPS, MAPS_PER_WORLD]]) {
+    WORLDS.forEach((world, w) => { for (let m = from; m < to; m++) order.push([world, w, m]); });
+  }
+  order.forEach(([world, w, m], index) => {
+    const t = index / (WORLDS.length * BASE_MAPS - 1); // Zusatzkarten: t > 1, also noch einmal schwerer
+    const goal = 1200 + 350 * index;
+    const d0 = Math.min(0.95, 0.02 + 0.55 * t);
+    const d1 = Math.min(1, d0 + 0.22 + 0.06 * m);
+    const [type2, type3] = PATTERN[m % PATTERN.length];
+    const times = WORLD_TIMES[world.id] || ['default'];
+    const id = `w${w + 1}m${m + 1}`;
+    maps.push({
+      id,
+      index,
+      world: w,
+      worldName: world.name,
+      number: m + 1,
+      name: m < BASE_MAPS ? MAP_NAMES[w][m] : BONUS_NAMES[w][m - BASE_MAPS],
+      seed: `campaign-${id}`,
+      time: times[hashSeed(`campaign-time-${id}`) % times.length],
+      goal,
+      d0: +d0.toFixed(3),
+      d1: +d1.toFixed(3),
+      goals: [
+        { star: 1, type: 'finish', target: goal, label: `Erreiche das Ziel (${goal.toLocaleString('de-DE')} m)` },
+        { star: 2, type: type2, target: target(type2, goal, 2), label: OBJECTIVES[type2].label(target(type2, goal, 2)) },
+        { star: 3, type: type3, target: target(type3, goal, 3), label: OBJECTIVES[type3].label(target(type3, goal, 3)) },
+      ],
+      // Belohnung beim ersten Mal je Stern (später kommt nichts mehr für denselben Stern)
+      rewards: [40, 60, 90].map((c) => Math.round(c * (1 + w * 0.5))),
+    });
   });
   return maps;
 }

@@ -19,11 +19,16 @@ const withGoals = (map, star2, star3) => finishedResult(map, {
 });
 
 describe('Karten', () => {
-  it('es gibt 20 Karten, 4 pro Welt, mit eindeutigen IDs und festen Seeds', () => {
-    assert.equal(CAMPAIGN_MAPS.length, WORLDS.length * 4);
-    assert.equal(new Set(CAMPAIGN_MAPS.map((m) => m.id)).size, 20);
-    assert.equal(new Set(CAMPAIGN_MAPS.map((m) => m.seed)).size, 20);
-    for (let w = 0; w < WORLDS.length; w++) assert.equal(CAMPAIGN_MAPS.filter((m) => m.world === w).length, 4);
+  it('es gibt 30 Karten, 6 pro Welt, mit eindeutigen IDs und festen Seeds', () => {
+    assert.equal(CAMPAIGN_MAPS.length, WORLDS.length * 6);
+    assert.equal(new Set(CAMPAIGN_MAPS.map((m) => m.id)).size, 30);
+    assert.equal(new Set(CAMPAIGN_MAPS.map((m) => m.seed)).size, 30);
+    assert.equal(new Set(CAMPAIGN_MAPS.map((m) => m.name)).size, 30, 'Namen eindeutig');
+    for (let w = 0; w < WORLDS.length; w++) assert.equal(CAMPAIGN_MAPS.filter((m) => m.world === w).length, 6);
+    // Die ersten 20 bleiben in Reihenfolge und Werten wie vorher (Fortschritt bestehender Spieler)
+    assert.deepEqual(CAMPAIGN_MAPS.slice(0, 20).map((m) => m.id).slice(0, 5), ['w1m1', 'w1m2', 'w1m3', 'w1m4', 'w2m1']);
+    assert.equal(CAMPAIGN_MAPS[19].id, 'w5m4');
+    assert.equal(CAMPAIGN_MAPS[20].id, 'w1m5');
   });
 
   it('Ziele werden länger, Karten schwerer, Tageszeiten gibt es in der Welt wirklich', () => {
@@ -74,7 +79,7 @@ describe('Freischaltung', () => {
     assert.ok(last < CAMPAIGN_MAPS.length - 1 && last >= 1, `mit 1 Stern kommt man bis Karte ${last + 1}`);
     for (const m of CAMPAIGN_MAPS) c.stars[m.id] = 3;
     assert.ok(CAMPAIGN_MAPS.every((m) => isMapUnlocked(c, m)));
-    assert.equal(totalStars(c), 60);
+    assert.equal(totalStars(c), 90);
   });
 });
 

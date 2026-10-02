@@ -1,4 +1,4 @@
-// Tests für Ranked-Karten (12-Stunden-Fenster) und den Fahrtverlauf für den Cheat-Schutz.
+// Tests für Ranked-Karten (Stundenfenster) und den Fahrtverlauf für den Cheat-Schutz.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -19,48 +19,47 @@ function fakeOnline(handler) {
 
 describe('Ranked-Fenster', () => {
   it('erkennt gültige Kennungen', () => {
-    assert.ok(isRankedSlot('20260922a'));
-    assert.ok(isRankedSlot('20260922b'));
-    assert.ok(!isRankedSlot('20260922c'));
-    assert.ok(!isRankedSlot('2026092a'));
+    assert.ok(isRankedSlot('2026092200'));
+    assert.ok(isRankedSlot('2026092223'));
+    assert.ok(!isRankedSlot('2026092224'));
+    assert.ok(!isRankedSlot('20260922a'));
+    assert.ok(!isRankedSlot('202609221'));
     assert.ok(!isRankedSlot(null));
-    assert.equal(rankedRaceId('20260922a'), 'ranked-20260922a');
-    assert.ok(isRankedRaceId('ranked-20260922b'));
+    assert.equal(rankedRaceId('2026092214'), 'ranked-2026092214');
+    assert.ok(isRankedRaceId('ranked-2026092214'));
     assert.ok(!isRankedRaceId('daily-20260922'));
   });
 
-  it('a und b desselben Tages folgen aufeinander', () => {
-    assert.equal(slotIndex('20260922b') - slotIndex('20260922a'), 1);
-    assert.equal(slotIndex('20260923a') - slotIndex('20260922b'), 1);
+  it('aufeinanderfolgende Stunden und Tage zählen lückenlos weiter', () => {
+    assert.equal(slotIndex('2026092214') - slotIndex('2026092213'), 1);
+    assert.equal(slotIndex('2026092300') - slotIndex('2026092223'), 1);
   });
 
   it('die Welt wechselt bei jeder Karte und deckt alle Welten ab', () => {
     const seen = new Set();
     let prev = -1;
-    for (let d = 0; d < 60; d++) {
-      for (const half of ['a', 'b']) {
-        const day = String(1 + (d % 28)).padStart(2, '0');
-        const month = String(1 + Math.floor(d / 28)).padStart(2, '0');
-        const w = rankedWorld(`2026${month}${day}${half}`);
-        assert.ok(w >= 0 && w < WORLDS.length);
-        assert.notEqual(w, prev, `${month}${day}${half}`);
-        prev = w;
-        seen.add(w);
-      }
+    for (let h = 0; h < 24 * 3; h++) {
+      const slot = `202609${String(22 + Math.floor(h / 24)).padStart(2, '0')}${String(h % 24).padStart(2, '0')}`;
+      const w = rankedWorld(slot);
+      assert.ok(w >= 0 && w < WORLDS.length);
+      assert.notEqual(w, prev, slot);
+      prev = w;
+      seen.add(w);
     }
     assert.equal(seen.size, WORLDS.length);
   });
 
   it('die lokale Ersatzberechnung liefert ein gültiges Fenster', () => {
     assert.ok(isRankedSlot(localSlot()));
-    // 2026-09-22 08:00 UTC = 10:00 Berlin (Sommerzeit) -> a; 10:00 UTC = 12:00 Berlin -> b
-    assert.equal(localSlot(Date.UTC(2026, 8, 22, 8, 0)), '20260922a');
-    assert.equal(localSlot(Date.UTC(2026, 8, 22, 10, 0)), '20260922b');
+    // Sommerzeit: 08:00 UTC = 10:00 Berlin
+    assert.equal(localSlot(Date.UTC(2026, 8, 22, 8, 0)), '2026092210');
+    assert.equal(localSlot(Date.UTC(2026, 8, 22, 8, 59)), '2026092210');
+    assert.equal(localSlot(Date.UTC(2026, 8, 22, 9, 0)), '2026092211');
     // 22:00 UTC = 00:00 Berlin des Folgetags
-    assert.equal(localSlot(Date.UTC(2026, 8, 22, 22, 0)), '20260923a');
+    assert.equal(localSlot(Date.UTC(2026, 8, 22, 22, 0)), '2026092300');
     // Winterzeit: 11:00 UTC = 12:00 Berlin
-    assert.equal(localSlot(Date.UTC(2026, 11, 2, 11, 0)), '20261202b');
-    assert.equal(localSlot(Date.UTC(2026, 11, 2, 10, 59)), '20261202a');
+    assert.equal(localSlot(Date.UTC(2026, 11, 2, 11, 0)), '2026120212');
+    assert.equal(localSlot(Date.UTC(2026, 11, 2, 10, 59)), '2026120211');
   });
 });
 
@@ -77,26 +76,26 @@ describe('Fahrtverlauf', () => {
   it('submitScore schickt den Verlauf mit', async () => {
     const { online, calls } = fakeOnline(async () => ({ data: [{ rank: 1, best: 500, is_record: true }] }));
     const trace = [40, 82, 125, 170];
-    const res = await online.submitScore(identity, { runId: RUN, score: 500, duration: 6.2, coins: 0, nearMisses: 0, overtakes: 6, smashed: 0, level: 1, car: 'blitz', raceId: 'ranked-20260922a', trace });
+    const res = await online.submitScore(identity, { runId: RUN, score: 500, duration: 6.2, coins: 0, nearMisses: 0, overtakes: 6, smashed: 0, level: 1, car: 'blitz', raceId: 'ranked-2026092214', trace });
     assert.equal(res.rank, 1);
     assert.deepEqual(calls[0].args.p_trace, trace);
-    assert.equal(calls[0].args.p_race, 'ranked-20260922a');
+    assert.equal(calls[0].args.p_race, 'ranked-2026092214');
   });
 
   it('leaderboard(ranked) fragt die richtige Karte ab', async () => {
     const { online, calls } = fakeOnline(async () => ({ data: [] }));
-    await online.leaderboard('ranked', '20260922b');
+    await online.leaderboard('ranked', '2026092214');
     assert.equal(calls[0].fn, 'leaderboard_ranked');
-    assert.equal(calls[0].args.p_slot, '20260922b');
+    assert.equal(calls[0].args.p_slot, '2026092214');
     await online.leaderboard('ranked', 'kaputt');
     assert.equal(calls[1].args.p_slot, '');
   });
 
   it('rankedInfo prüft die Antwort', async () => {
-    const good = fakeOnline(async () => ({ data: [{ slot: '20260922a', starts_at: '2026-09-21T22:00:00Z', ends_at: '2026-09-22T10:00:00Z', server_now: '2026-09-22T06:00:00Z' }] }));
+    const good = fakeOnline(async () => ({ data: [{ slot: '2026092214', starts_at: '2026-09-22T12:00:00Z', ends_at: '2026-09-22T13:00:00Z', server_now: '2026-09-22T12:20:00Z' }] }));
     const info = await good.online.rankedInfo();
-    assert.equal(info.slot, '20260922a');
-    assert.equal(info.endsAt, Date.parse('2026-09-22T10:00:00Z'));
+    assert.equal(info.slot, '2026092214');
+    assert.equal(info.endsAt, Date.parse('2026-09-22T13:00:00Z'));
     const bad = fakeOnline(async () => ({ data: [{ slot: '<b>', starts_at: 'x', ends_at: 'y', server_now: 'z' }] }));
     assert.ok((await bad.online.rankedInfo()).error);
   });

@@ -190,8 +190,11 @@ function detectQuality() {
   if (isTouch || cores <= 4) return 'medium';
   return 'high';
 }
+// Grafik (Effekte, kostet Bildrate) und Bildqualität (Auflösung, Kantenglättung) sind getrennte Einstellungen
 const quality = profile.settings.quality === 'auto' ? detectQuality() : profile.settings.quality;
-const MAX_PIXEL_RATIO = quality === 'low' ? 1 : quality === 'medium' ? 1.25 : 1.5;
+const imageQuality = profile.settings.imageQuality === 'auto' ? detectQuality() : profile.settings.imageQuality;
+const MAX_PIXEL_RATIO = imageQuality === 'low' ? 1 : imageQuality === 'medium' ? 1.25 : 1.5;
+const MSAA_SAMPLES = imageQuality === 'high' ? 4 : imageQuality === 'medium' ? 2 : 0;
 let pixelRatio = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
 
 function boot() {
@@ -200,7 +203,7 @@ function boot() {
   ui.setLoading('Motor wird vorgeglüht …');
 
   try {
-    renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+    renderer = new THREE.WebGLRenderer({ antialias: quality === 'low' && MSAA_SAMPLES > 0, powerPreference: 'high-performance' });
   } catch (err) {
     ui.showFatal('WebGL nicht verfügbar', 'Dein Browser oder Gerät unterstützt kein WebGL. Probier einen aktuellen Chrome, Edge, Firefox oder Safari.');
     return;
@@ -221,7 +224,7 @@ function boot() {
   world = new World({ scene, renderer, quality });
   world.setWorld(0, true);
   structures = new Structures({ scene, quality });
-  effects = new Effects({ renderer, scene, camera, quality });
+  effects = new Effects({ renderer, scene, camera, quality, samples: MSAA_SAMPLES });
   effects.setSize(window.innerWidth, window.innerHeight);
 
   game = new Game({ scene, effects, audio, events: gameEvents });
@@ -361,13 +364,14 @@ function frame(now) {
  * Schritt für Schritt Aufwand ab – zuerst Auflösung, dann Leuchteffekt, dann Schatten. Nach jedem Schritt wird
  * wieder gemessen. Rückwärts geht es bewusst nicht (sonst würde das Bild ständig hin- und herspringen).
  */
+// kind: 'fx' wirkt nur bei Grafik = Auto, 'res' nur bei Bildqualität = Auto (eine feste Wahl bleibt, wie sie ist)
 const PERF_STEPS = [
-  () => setResolution(Math.min(pixelRatio, 1.25)),
-  () => setResolution(Math.min(pixelRatio, 1)),
-  () => effects.setBloomEnabled(false),
-  () => world.setShadowsEnabled(false),
-  () => setResolution(Math.min(pixelRatio, 0.85)),
-  () => setResolution(Math.min(pixelRatio, 0.7)),
+  { kind: 'res', run: () => setResolution(Math.min(pixelRatio, 1.25)) },
+  { kind: 'res', run: () => setResolution(Math.min(pixelRatio, 1)) },
+  { kind: 'fx', run: () => effects.setBloomEnabled(false) },
+  { kind: 'fx', run: () => world.setShadowsEnabled(false) },
+  { kind: 'res', run: () => setResolution(Math.min(pixelRatio, 0.85)) },
+  { kind: 'res', run: () => setResolution(Math.min(pixelRatio, 0.7)) },
 ];
 
 function setResolution(ratio) {
@@ -379,7 +383,7 @@ function setResolution(ratio) {
 }
 
 function governPerformance(dt, inRun) {
-  if (!inRun || app.paused || profile.settings.quality === 'high') return; // "Hoch" bleibt, wie es ist
+  if (!inRun || app.paused || (profile.settings.quality !== 'auto' && profile.settings.imageQuality !== 'auto')) return; // feste Wahl bleibt, wie sie ist
   perf.sum += dt;
   perf.frames += 1;
   if (perf.sum < 1.5) return;
@@ -389,7 +393,8 @@ function governPerformance(dt, inRun) {
   if (avg > 1 / 48 && perf.step < PERF_STEPS.length) {
     perf.slowFor += 1;
     if (perf.slowFor >= 2) {
-      PERF_STEPS[perf.step]();
+      const step = PERF_STEPS[perf.step];
+      if ((step.kind === 'fx' ? profile.settings.quality : profile.settings.imageQuality) === 'auto') step.run();
       perf.step += 1;
       perf.slowFor = 0;
     }
@@ -685,7 +690,7 @@ function previewVolume(partial) {
 function changeSettings(partial) {
   const before = profile.settings;
   previewVolume(partial);
-  const qualityChanged = partial.quality && partial.quality !== before.quality;
+  const qualityChanged = (partial.quality && partial.quality !== before.quality) || (partial.imageQuality && partial.imageQuality !== before.imageQuality);
   profile.settings = sanitizeSettings({ ...before, ...partial });
   saveProfile(profile);
   audio.setSettings(profile.settings);
@@ -699,7 +704,7 @@ function changeSettings(partial) {
 
 /** Alle Einstellungen auf die Standardwerte (Münzen, Autos und Name bleiben). */
 function resetSettings() {
-  const qualityChanged = profile.settings.quality !== DEFAULT_SETTINGS.quality;
+  const qualityChanged = profile.settings.quality !== DEFAULT_SETTINGS.quality || profile.settings.imageQuality !== DEFAULT_SETTINGS.imageQuality;
   profile.settings = { ...DEFAULT_SETTINGS };
   saveProfile(profile);
   audio.setSettings(profile.settings);
@@ -1244,7 +1249,7 @@ function restartRun() {
 }
 
 // ---------------------------------------------------------------------------
-// Ranked-Karten: alle 12 Stunden eine neue Strecke in einer festen Welt (Zählung: Wochenwertung)
+// Ranked-Karten: jede Stunde eine neue Strecke in einer festen Welt (Zählung: Wochenwertung)
 // ---------------------------------------------------------------------------
 /** Holt die aktuelle Karte vom Server (nur wenn die bekannte abgelaufen ist oder force gesetzt ist). */
 async function refreshRanked(force = false) {
@@ -1259,7 +1264,7 @@ async function refreshRanked(force = false) {
 
 function rankedMenuText() {
   const r = app.ranked;
-  if (!r) return 'Neue Karte alle 12 Stunden';
+  if (!r) return 'Jede Stunde eine neue Karte';
   const left = Math.max(0, r.endsAt - (Date.now() + r.offset));
   const h = Math.floor(left / 3600000);
   const m = Math.floor((left % 3600000) / 60000);

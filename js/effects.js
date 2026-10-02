@@ -71,11 +71,12 @@ const SHIELD_FRAGMENT = `
 `;
 
 export class Effects {
-  constructor({ renderer, scene, camera, quality = 'high' }) {
+  constructor({ renderer, scene, camera, quality = 'high', samples = 4 }) {
     this.renderer = renderer;
     this.scene = scene;
     this.camera = camera;
-    this.quality = quality;
+    this.quality = quality;   // Grafik (Effekte/Partikel/Bloom) – kostet Bildrate, ändert nicht die Schärfe
+    this.samples = samples;   // Kantenglättung (MSAA) kommt aus der Bildqualität
     this.time = 0;
 
     // Die Kamera muss im Szenengraph hängen, damit an ihr befestigte
@@ -95,8 +96,8 @@ export class Effects {
   #createComposer() {
     const size = this.renderer.getSize(new THREE.Vector2());
     // Mit Nachbearbeitung gilt das Kantenglätten des Canvas nicht mehr – deshalb bekommt das Zielbild selbst MSAA
-    // (Hoch: 4×, Mittel: 2×). Geht das nicht, läuft es wie bisher ohne.
-    const samples = this.quality === 'high' ? 4 : this.quality === 'medium' ? 2 : 0;
+    // (aus der Bildqualität). Geht das nicht, läuft es wie bisher ohne.
+    const samples = this.samples;
     let target;
     if (samples && this.renderer.capabilities.isWebGL2) {
       try {
@@ -121,7 +122,7 @@ export class Effects {
   #applyComposerScale() {
     if (!this.composer) return;
     const base = this.renderer.getPixelRatio();
-    this._composerRatio = this.quality === 'medium' ? base * 0.7 : base;
+    this._composerRatio = base;
     this.composer.setPixelRatio(this._composerRatio);
     this.#sizeBloom();
   }

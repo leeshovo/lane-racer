@@ -65,7 +65,7 @@ const QUALITY_PRESETS = {
   // 44 × 68 m rund ums Auto ab – 1024 px reichen dafür scharf genug.
   high:   { shadow: 1024, aniso: 8, density: 0.8,  points: 700, rain: 700, stars: 700 },
   medium: { shadow: 512,  aniso: 4, density: 0.55, points: 420, rain: 380, stars: 480 },
-  low:    { shadow: 0,    aniso: 1, density: 0.4,  points: 220, rain: 190, stars: 320 },
+  low:    { shadow: 0,    aniso: 4, density: 0.4,  points: 220, rain: 190, stars: 320 },
 };
 
 // ---------------------------------------------------------------------------

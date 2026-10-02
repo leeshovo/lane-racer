@@ -154,3 +154,14 @@ describe('Verkehrsvielfalt', () => {
     for (const def of TRAFFIC) assert.ok(def.size.every((n) => n > 0), def.type);
   });
 });
+
+describe('Grafik und Bildqualität sind getrennte Einstellungen', () => {
+  it('beide lassen sich unabhängig setzen, Unsinn fällt auf Auto zurück', () => {
+    const s = sanitizeSettings({ quality: 'low', imageQuality: 'high' });
+    assert.equal(s.quality, 'low');
+    assert.equal(s.imageQuality, 'high');
+    const bad = sanitizeSettings({ quality: 'low', imageQuality: 'ultra' });
+    assert.equal(bad.imageQuality, 'auto');
+    assert.equal(sanitizeSettings({}).imageQuality, 'auto');
+  });
+});

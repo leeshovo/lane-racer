@@ -9,7 +9,7 @@
  */
 export const RESET_EPOCH = '2026-09-22-final';
 
-export const VERSION = '2.7.0';
+export const VERSION = '2.8.0';
 
 // Öffentliche Supabase-Zugangsdaten (Publishable Key darf im Browser stehen –
 // geschützt wird über Row Level Security und geprüfte Server-Funktionen).
@@ -473,7 +473,8 @@ export const DEFAULT_SETTINGS = {
   engineVolume: 0.6,
   muteInBackground: true,
   // Grafik und Effekte
-  quality: 'auto',
+  quality: 'auto',        // Grafik: Schatten, Dichte, Effekte (kostet Bildrate)
+  imageQuality: 'auto',   // Bildqualität: Auflösung und Kantenglättung (unabhängig von der Grafik)
   bend: true,
   bloom: true,
   speedFx: true,
@@ -513,8 +514,13 @@ export const SETTINGS_GROUPS = [
     title: 'Grafik und Effekte',
     items: [
       {
-        key: 'quality', type: 'seg', label: 'Grafikqualität',
-        desc: 'Auto passt sich deinem Gerät an. Eine Änderung lädt das Spiel kurz neu.',
+        key: 'quality', type: 'seg', label: 'Grafik',
+        desc: 'Schatten, Leuchteffekte, Partikel und Dekoration. Niedrig gibt mehr Bilder pro Sekunde, ohne das Bild unschärfer zu machen. Auto passt sich deinem Gerät an. Eine Änderung lädt das Spiel kurz neu.',
+        options: [['auto', 'Auto'], ['high', 'Hoch'], ['medium', 'Mittel'], ['low', 'Niedrig']],
+      },
+      {
+        key: 'imageQuality', type: 'seg', label: 'Bildqualität',
+        desc: 'Schärfe und Kantenglättung, unabhängig von der Grafik. Niedriger = weniger Rechenaufwand, aber unschärferes Bild. Eine Änderung lädt das Spiel kurz neu.',
         options: [['auto', 'Auto'], ['high', 'Hoch'], ['medium', 'Mittel'], ['low', 'Niedrig']],
       },
       { key: 'bend', type: 'switch', label: 'Kurven und Hügel', desc: 'Die Straße schwingt seitlich und über Kuppen' },

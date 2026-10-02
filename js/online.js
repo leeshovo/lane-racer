@@ -641,7 +641,7 @@ export class Online {
   }
 
   /**
-   * Aktuelle Ranked-Karte (wechselt alle 12 Stunden): Kennung und Ende nach Server-Uhr.
+   * Aktuelle Ranked-Karte (wechselt jede Stunde): Kennung und Ende nach Server-Uhr.
    * @returns {Promise<{ slot: string, startsAt: number, endsAt: number, offset: number } | { error, code }>}
    */
   async rankedInfo() {
